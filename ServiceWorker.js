@@ -1,9 +1,9 @@
 const cacheName = "DefaultCompany-Chessly_WEC-1.0";
 const contentToCache = [
     "Build/v1.loader.js",
-    "Build/v1.framework.js",
-    "Build/v1.data",
-    "Build/v1.wasm",
+    "Build/v1.framework.js.gz",
+    "Build/v1.data.gz",
+    "Build/v1.wasm.gz",
     "TemplateData/style.css"
 
 ];
