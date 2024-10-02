@@ -1,6 +1,6 @@
 {
-    "name": "Chessly_WEC",
-    "short_name": "Chessly_WEC",
+    "name": "Chessly_WECREC",
+    "short_name": "Chessly_WECREC",
     "start_url": "index.html",
     "display": "fullscreen",
     "background_color": "#231F20",
