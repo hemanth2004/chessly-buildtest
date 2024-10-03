@@ -305,6 +305,14 @@ function SendMessage(gameObject, func, param)
         throw "" + param + " is does not have a type which is supported by SendMessage.";
 }
 Module["SendMessage"] = SendMessage; // to avoid emscripten stripping
+var ___cxa_throw = (function() {
+    var original___cxa_throw = ___cxa_throw;
+
+    return function() {
+        console.log("Exception at: \n"+stackTrace());
+        original___cxa_throw();
+    }
+})();
 
 // Sometimes an existing Module object exists with properties
 // meant to overwrite the default module functionality. Here
@@ -1975,13 +1983,13 @@ var tempI64;
 // === Body ===
 
 var ASM_CONSTS = {
-  1301308: function() {Module['emscripten_get_now_backup'] = performance.now;},  
- 1301363: function($0) {performance.now = function() { return $0; };},  
- 1301411: function($0) {performance.now = function() { return $0; };},  
- 1301459: function() {performance.now = Module['emscripten_get_now_backup'];},  
- 1301514: function() {return Module.webglContextAttributes.premultipliedAlpha;},  
- 1301575: function() {return Module.webglContextAttributes.preserveDrawingBuffer;},  
- 1301639: function() {return Module.webglContextAttributes.powerPreference;}
+  2881356: function() {Module['emscripten_get_now_backup'] = performance.now;},  
+ 2881411: function($0) {performance.now = function() { return $0; };},  
+ 2881459: function($0) {performance.now = function() { return $0; };},  
+ 2881507: function() {performance.now = Module['emscripten_get_now_backup'];},  
+ 2881562: function() {return Module.webglContextAttributes.premultipliedAlpha;},  
+ 2881623: function() {return Module.webglContextAttributes.preserveDrawingBuffer;},  
+ 2881687: function() {return Module.webglContextAttributes.powerPreference;}
 };
 
 
@@ -2425,6 +2433,12 @@ var ASM_CONSTS = {
   		return _JS_DOM_UnityCanvasSelector.ptr;
   	}
 
+  function _JS_Eval_OpenURL(ptr)
+  {
+  	var str = UTF8ToString(ptr);
+  	window.open(str, '_blank', '');
+  }
+
   var fs = {numPendingSync:0,syncInternal:1000,syncInProgress:false,sync:function(onlyPendingSync)
   	{
   		if (onlyPendingSync) {
@@ -2771,6 +2785,210 @@ var ASM_CONSTS = {
       return mobile_input_ignore_blur_event;
   }
 
+  function _JS_MobileKeyboard_GetKeyboardStatus()
+  {
+      var kKeyboardStatusVisible = 0;
+      var kKeyboardStatusDone = 1;
+      //var kKeyboardStatusCanceled = 2;
+      //var kKeyboardStatusLostFocus = 3;
+      if (!mobile_input) return kKeyboardStatusDone;
+      return kKeyboardStatusVisible;
+  }
+
+  function _JS_MobileKeyboard_GetText(buffer, bufferSize)
+  {
+      // If the keyboard was closed, use the cached version of the input's text so that Unity can
+      // still ask for it.
+      var text = mobile_input && mobile_input.input ? mobile_input.input.value :
+          mobile_input_text ? mobile_input_text :
+          "";
+      if (buffer) stringToUTF8(text, buffer, bufferSize);
+      return lengthBytesUTF8(text);
+  }
+
+  function _JS_MobileKeyboard_GetTextSelection(outStart, outLength)
+  {
+      if (!mobile_input) {
+          HEAP32[outStart >> 2] = 0;
+          HEAP32[outLength >> 2] = 0;
+          return;
+      }
+      HEAP32[outStart >> 2] = mobile_input.input.selectionStart;
+      HEAP32[outLength >> 2] = mobile_input.input.selectionEnd - mobile_input.input.selectionStart;
+  }
+
+  function _JS_MobileKeyboard_Hide(delay)
+  {
+      if (mobile_input_hide_delay) return;
+      mobile_input_ignore_blur_event = true;
+  
+      function hideMobileKeyboard() {
+          if (mobile_input && mobile_input.input) {
+              mobile_input_text = mobile_input.input.value;
+              mobile_input.input = null;
+              if (mobile_input.parentNode && mobile_input.parentNode) {
+                  mobile_input.parentNode.removeChild(mobile_input);
+              }
+          }
+          mobile_input = null;
+          mobile_input_hide_delay = null;
+  
+          // mobile_input_ignore_blur_event was set to true so that ScreenManagerWebGL will ignore
+          // the blur event it might get from the closing of the keyboard. But it might not get that
+          // blur event, too, depending on the browser. So we want to clear the flag, as soon as we
+          // can, but some time after the blur event has been potentially fired.
+          setTimeout(function() {
+              mobile_input_ignore_blur_event = false;
+          }, 100);
+      }
+  
+      if (delay) {
+          // Delaying the hide of the input/keyboard allows a new input to be selected and re-use the
+          // existing control. This fixes a problem where a quick tap select of a new element would
+          // cause it to not be displayed because it tried to be focused before the old keyboard finished
+          // sliding away.
+          var hideDelay = 200;
+          mobile_input_hide_delay = setTimeout(hideMobileKeyboard, hideDelay);
+      } else {
+          hideMobileKeyboard();
+      }
+  }
+
+  function _JS_MobileKeyboard_SetCharacterLimit(limit)
+  {
+      if (!mobile_input) return;
+      mobile_input.input.maxLength = limit;
+  }
+
+  function _JS_MobileKeyboard_SetText(text)
+  {
+      if (!mobile_input) return;
+      text = UTF8ToString(text);
+      mobile_input.input.value = text;
+  }
+
+  function _JS_MobileKeyboard_SetTextSelection(start, length)
+  {
+      if (!mobile_input) return;
+      mobile_input.input.setSelectionRange(start, start + length);
+  }
+
+  function _JS_MobileKeyboard_Show(text, keyboardType, autocorrection, multiline, secure, alert,
+                                   placeholder, characterLimit)
+  {
+      if (mobile_input_hide_delay) {
+          clearTimeout(mobile_input_hide_delay);
+          mobile_input_hide_delay = null;
+      }
+  
+      text = UTF8ToString(text);
+      mobile_input_text = text;
+  
+      placeholder = UTF8ToString(placeholder);
+  
+      var container = document.body;
+  
+      var hasExistingMobileInput = !!mobile_input;
+  
+      // From KeyboardOnScreen::KeyboardTypes
+      var input_type;
+      var KEYBOARD_TYPE_NUMBERS_AND_PUNCTUATION = 2;
+      var KEYBOARD_TYPE_URL = 3;
+      var KEYBOARD_TYPE_NUMBER_PAD = 4;
+      var KEYBOARD_TYPE_PHONE_PAD = 5;
+      var KEYBOARD_TYPE_EMAIL_ADDRESS = 7;
+      if (!secure) {
+          switch (keyboardType) {
+              case KEYBOARD_TYPE_EMAIL_ADDRESS:
+                  input_type = "email";
+                  break;
+              case KEYBOARD_TYPE_URL:
+                  input_type = "url";
+                  break;
+              case KEYBOARD_TYPE_NUMBERS_AND_PUNCTUATION:
+              case KEYBOARD_TYPE_NUMBER_PAD:
+              case KEYBOARD_TYPE_PHONE_PAD:
+                  input_type = "number";
+                  break;
+              default:
+                  input_type = "text";
+                  break;
+          }
+      } else {
+          input_type = "password";
+      }
+  
+      if (hasExistingMobileInput) {
+          if (mobile_input.multiline != multiline) {
+              _JS_MobileKeyboard_Hide(false);
+              return;
+          }
+      }
+  
+      var inputContainer = mobile_input || document.createElement("div");
+      if (!hasExistingMobileInput) {
+          inputContainer.style = "width:100%; position:fixed; bottom:0px; margin:0px; padding:0px; left:0px; border: 1px solid #000; border-radius: 5px; background-color:#fff; font-size:14pt;";
+          container.appendChild(inputContainer);
+          mobile_input = inputContainer;
+      }
+  
+      var input = hasExistingMobileInput ?
+          mobile_input.input :
+          document.createElement(multiline ? "textarea" : "input");
+  
+      mobile_input.multiline = multiline;
+      mobile_input.secure = secure;
+      mobile_input.keyboardType = keyboardType;
+      mobile_input.inputType = input_type;
+  
+      input.type = input_type;
+      input.style = "width:calc(100% - 85px); " + (multiline ? "height:100px;" : "") + "vertical-align:top; border-radius: 5px; outline:none; cursor:default; resize:none; border:0px; padding:10px 0px 10px 10px;";
+  
+      input.spellcheck = autocorrection ? true : false;
+      input.maxLength = characterLimit > 0 ? characterLimit : 524288;
+      input.value = text;
+      input.placeholder = placeholder;
+  
+      if (!hasExistingMobileInput) {
+          inputContainer.appendChild(input);
+          inputContainer.input = input;
+      }
+  
+      if (!hasExistingMobileInput) {
+          var okButton = document.createElement("button");
+          okButton.innerText = "OK";
+          okButton.style = "border:0; position:absolute; left:calc(100% - 75px); top:0px; width:75px; height:100%; margin:0; padding:0; border-radius: 5px; background-color:#fff";
+          okButton.addEventListener("touchend", function() {
+              _JS_MobileKeyboard_Hide(true);
+          });
+  
+          inputContainer.appendChild(okButton);
+          inputContainer.okButton = okButton;
+  
+          // For single-line text input, enter key will close the keyboard.
+          input.addEventListener('keyup', function(e) {
+              if (input.parentNode.multiline) return;
+              if (e.code == 'Enter' || e.which == 13 || e.keyCode == 13) {
+                  _JS_MobileKeyboard_Hide(true);
+              }
+          });
+  
+          // On iOS, the keyboard has a done button that hides the keyboard. The only way to detect
+          // when this happens seems to be when the HTML input looses focus, so we watch for the blur
+          // event on the input element and close the element/keybaord when it's gotten.
+          input.addEventListener("blur", function(e) {
+              _JS_MobileKeyboard_Hide(true);
+              e.stopPropagation();
+              e.preventDefault();
+          });
+  
+          input.select();
+          input.focus();
+      } else {
+          input.select();
+      }
+  }
+
   var JS_OrientationSensor = null;
   
   var JS_OrientationSensor_callback = 0;
@@ -2993,946 +3211,6 @@ var ASM_CONSTS = {
   	}
 
   var WEBAudio = {audioInstanceIdCounter:0,audioInstances:{},audioContext:null,audioWebEnabled:0,audioCache:[],pendingAudioSources:{}};
-  function jsAudioMixinSetPitch(source) {
-  	// Add a helper to AudioBufferSourceNode which gives the current playback position of the clip in seconds.
-  	source.estimatePlaybackPosition = function () {
-  		var t = (WEBAudio.audioContext.currentTime - source.playbackStartTime) * source.playbackRate.value;
-  		// Collapse extra times that the audio clip has looped through.
-  		if (source.loop && t >= source.loopStart) {
-  			t = (t - source.loopStart) % (source.loopEnd - source.loopStart) + source.loopStart;
-  		}
-  		return t;
-  	}
-  
-  	// Add a helper to AudioBufferSourceNode to allow adjusting pitch in a way that keeps playback position estimation functioning.
-  	source.setPitch = function (newPitch) {
-  		var curPosition = source.estimatePlaybackPosition();
-  		if (curPosition >= 0) { // If negative, the clip has not begun to play yet (that delay is not scaled by pitch)
-  			source.playbackStartTime = WEBAudio.audioContext.currentTime - curPosition / newPitch;
-  		}
-  		if (source.playbackRate.value !== newPitch) source.playbackRate.value = newPitch;
-  	}
-  }
-  function jsAudioCreateUncompressedSoundClip(buffer, error) {
-  	var soundClip = {
-  		buffer: buffer,
-  		error: error
-  	};
-  
-  	/**
-  	 * Release resources of a sound clip
-  	 */
-  	soundClip.release = function () { };
-  
-  	/**
-  	 * Get length of sound clip in number of samples
-  	 * @returns {number}
-  	 */
-  	soundClip.getLength = function () {
-  		if (!this.buffer) {
-  			console.log ("Trying to get length of sound which is not loaded.");
-  			return 0;
-  		}
-  
-  		// Fakemod assumes sample rate is 44100, though that's not necessarily the case,
-  		// depending on OS, if the audio file was not imported by our pipeline.
-  		// Therefore we need to recalculate the length based on the actual samplerate.
-  		var sampleRateRatio = 44100 / this.buffer.sampleRate;
-  		return this.buffer.length * sampleRateRatio;
-  	}
-  
-  	/**
-  	 * Gets uncompressed audio data from sound clip.
-  	 * If output buffer is smaller than the sound data only the first portion
-  	 * of the sound data is read.
-  	 * Sound clips with multiple channels will be stored one after the other.
-  	 *
-  	 * @param {number} ptr Pointer to the output buffer
-  	 * @param {number} length Size of output buffer in bytes
-  	 * @returns Size of data in bytes written to output buffer
-  	 */
-  	soundClip.getData = function (ptr, length) {
-  		if (!this.buffer) {
-  			console.log ("Trying to get data of sound which is not loaded.");
-  			return 0;
-  		}
-  
-  		// Get output buffer
-  		var startOutputBuffer = ptr >> 2;
-  		var output = HEAPF32.subarray(startOutputBuffer, startOutputBuffer + (length >> 2));
-  		var numMaxSamples = Math.floor((length >> 2) / this.buffer.numberOfChannels);
-  		var numReadSamples = Math.min(this.buffer.length, numMaxSamples);
-  
-  		// Copy audio data to outputbuffer
-  		for (var i = 0; i < this.buffer.numberOfChannels; i++) {
-  			var channelData = this.buffer.getChannelData(i).subarray(0, numReadSamples);
-  			output.set(channelData, i * numReadSamples);
-  		}
-  
-  		return numReadSamples * this.buffer.numberOfChannels * 4;
-  	}
-  
-  	/**
-  	 * Gets number of channels of soundclip
-  	 * @returns {number}
-  	 */
-  	soundClip.getNumberOfChannels = function () {
-  		if (!this.buffer) {
-  			console.log ("Trying to get metadata of sound which is not loaded.");
-  			return 0;
-  		}
-  
-  		return this.buffer.numberOfChannels;
-  	}
-  
-  	/**
-  	 * Gets sampling rate in Hz
-  	 * @returns {number}
-  	 */
-  	soundClip.getFrequency = function () {
-  		if (!this.buffer) {
-  			console.log ("Trying to get metadata of sound which is not loaded.");
-  			return 0;
-  		}
-  
-  		return this.buffer.sampleRate;
-  	}
-  
-  	/**
-  	 * Create an audio source node.
-  	 * @returns {AudioBufferSourceNode}
-  	 */
-  	soundClip.createSourceNode = function () {
-  		if (!this.buffer) {
-  			console.log ("Trying to play sound which is not loaded.");
-  		}
-  
-  		var source = WEBAudio.audioContext.createBufferSource();
-  		source.buffer = this.buffer;
-  		jsAudioMixinSetPitch(source);
-  
-  		return source;
-  	};
-  
-  	return soundClip;
-  }
-  function jsAudioCreateChannel(callback, userData) {
-  	var channel = {
-  		callback: callback,
-  		userData: userData,
-  		source: null,
-  		gain: WEBAudio.audioContext.createGain(),
-  		panner: WEBAudio.audioContext.createPanner(),
-  		threeD: false,
-  		loop: false,
-  		loopStart: 0,
-  		loopEnd: 0,
-  		pitch: 1.0
-  	};
-  
-  	channel.panner.rolloffFactor = 0; // We calculate rolloff ourselves.
-  
-  	/**
-  	 * Release internal resources.
-  	 */
-  	channel.release = function () {
-  		// Explicitly disconnect audio nodes related to this audio channel when the channel should be
-  		// GCd to work around Safari audio performance bug that resulted in crackling audio; as suggested
-  		// in https://bugs.webkit.org/show_bug.cgi?id=222098#c23
-  		this.disconnectSource();
-  		this.gain.disconnect();
-  		this.panner.disconnect();
-  	}
-  
-  	/**
-  	 * Play a sound clip on the channel
-  	 * @param {UncompressedSoundClip|CompressedSoundClip} soundClip
-  	 * @param {number} startTime Scheduled start time in seconds
-  	 * @param {number} startOffset Start offset in seconds
-  	 */
-  	channel.playSoundClip = function (soundClip, startTime, startOffset) {
-  		try {
-  			var self = this;
-  			this.source = soundClip.createSourceNode();
-  			this.setupPanning();
-  
-  			// Setup on ended callback
-  			this.source.onended = function () {
-  				self.source.isStopped = true;
-  				self.disconnectSource();
-  				if (self.callback) {
-  					dynCall("vi", self.callback, [self.userData]);
-  				}
-  			};
-  
-  			this.source.loop = this.loop;
-  			this.source.loopStart = this.loopStart;
-  			this.source.loopEnd = this.loopEnd;
-  			this.source.start(startTime, startOffset);
-  			this.source.scheduledStartTime = startTime;
-  			this.source.playbackStartTime = startTime - startOffset / this.source.playbackRate.value;
-  			this.source.setPitch(this.pitch);
-  		} catch (e) {
-  			// Need to catch exception, otherwise execution will stop on Safari if audio output is missing/broken
-  			console.error("Channel.playSoundClip error. Exception: " + e);
-  		}
-  	};
-  
-  	/**
-  	 * Stop playback on channel
-  	 */
-  	channel.stop = function (delay) {
-  		if (!this.source) {
-  			return;
-  		}
-  
-  		// stop source currently playing.
-  		try {
-  			channel.source.stop(WEBAudio.audioContext.currentTime + delay);
-  		} catch (e) {
-  			// when stop() is used more than once for the same source in Safari it causes the following exception:
-  			// InvalidStateError: DOM Exception 11: An attempt was made to use an object that is not, or is no longer, usable.
-  			// Ignore that exception.
-  		}
-  
-  		if (delay == 0) {
-  			this.disconnectSource();
-  		}
-  	};
-  
-  	/**
-  	 * Return wether the channel is currently paused
-  	 * @returns {boolean}
-  	 */
-  	channel.isPaused = function () {
-  		if (!this.source) {
-  			return true;
-  		}
-  
-  		if (this.source.isPausedMockNode) {
-  			return true;
-  		}
-  
-  		if (this.source.mediaElement) {
-  			return this.source.mediaElement.paused || this.source.pauseRequested;
-  		}
-  
-  		return false;
-  	};
-  
-  	/**
-  	 * Pause playback of channel
-  	 */
-  	channel.pause = function () {
-  		if (!this.source || this.source.isPausedMockNode) {
-  			return;
-  		}
-  
-  		if (this.source.mediaElement) {
-  			this.source._pauseMediaElement();
-  			return;
-  		}
-  
-  		// WebAudio does not have support for pausing and resuming AudioBufferSourceNodes (they are a fire-once abstraction)
-  		// When we want to pause a node, create a mocked object in its place that represents the needed state that is required
-  		// for resuming the clip.
-  		var pausedSource = {
-  			isPausedMockNode: true,
-  			buffer: this.source.buffer,
-  			loop: this.source.loop,
-  			loopStart: this.source.loopStart,
-  			loopEnd: this.source.loopEnd,
-  			playbackRate: this.source.playbackRate.value,
-  			scheduledStartTime: this.source.scheduledStartTime,
-  			scheduledStopTime: undefined,
-  			// Specifies in seconds the time at the clip where the playback was paused at.
-  			// Can be negative if the audio clip has not started yet.
-  			playbackPausedAtPosition: this.source.estimatePlaybackPosition(),
-  			setPitch: function (v) { this.playbackRate = v; },
-  			stop: function(when) { this.scheduledStopTime = when; }
-  		};
-  		// Stop and clear the real audio source...
-  		this.stop(0);
-  		this.disconnectSource();
-  		// .. and replace the source with a paused mock version.
-  		this.source = pausedSource;
-  	};
-  
-  	/**
-  	 * Resume playback on channel.
-  	 */
-  	channel.resume = function () {
-  		// If the source is a compressed audio MediaElement, it was directly paused so we can
-  		// directly play it again.
-  		if (this.source && this.source.mediaElement) {
-  			this.source.start(undefined, this.source.currentTime);
-  			return;
-  		}
-  
-  		// N.B. We only resume a source that has been previously paused. That is, resume() cannot be used to start playback if
-  		// channel was not playing an audio clip before, but playSoundClip() is to be used.
-  		if (!this.source || !this.source.isPausedMockNode) {
-  			return;
-  		}
-  
-  		var pausedSource = this.source;
-  		var soundClip = jsAudioCreateUncompressedSoundClip(pausedSource.buffer, false);
-  		this.playSoundClip(soundClip, pausedSource.scheduledStartTime, Math.max(0, pausedSource.playbackPausedAtPosition));
-  		this.source.loop = pausedSource.loop;
-  		this.source.loopStart = pausedSource.loopStart;
-  		this.source.loopEnd = pausedSource.loopEnd;
-  		this.source.setPitch(pausedSource.playbackRate);
-  
-  		// Apply scheduled stop of source if present
-  		if (typeof pausedSource.scheduledStopTime !== "undefined") {
-  			var delay = Math.max(pausedSource.scheduledStopTime - WEBAudio.audioContext.currentTime, 0);
-  			this.stop(delay);
-  		}
-  	};
-  
-  	/**
-  	 * Set loop mode
-  	 * @param {boolean} loop If true audio will be looped.
-  	 */
-  	channel.setLoop = function (loop) {
-  		this.loop = loop;
-  		if (!this.source || this.source.loop == loop) {
-  			return;
-  		}
-  
-  		this.source.loop = loop;
-  	}
-  
-  	/**
-  	 * Set loop start and end
-  	 * @param {number} loopStart Start of the loop in seconds.
-  	 * @param {number} loopEnd End of the loop in seconds.
-  	 */
-  	channel.setLoopPoints = function (loopStart, loopEnd) {
-  		this.loopStart = loopStart;
-  		this.loopEnd = loopEnd;
-  		if (!this.source) {
-  			return;
-  		}
-  
-  		if (this.source.loopStart !== loopStart) {
-  			this.source.loopStart = loopStart;
-  		}
-  
-  		if (this.source.loopEnd !== loopEnd) {
-  			this.source.loopEnd = loopEnd;
-  		}
-  	}
-  
-  	/**
-  	 * Set channel 3D mode
-  	 * @param {boolean} threeD If true the channel will be played back as 3D audio
-  	 */
-  	channel.set3D = function (threeD) {
-  		if (this.threeD == threeD) {
-  			return;
-  		}
-  		this.threeD = threeD;
-  
-  		// Only update node graph is source is initialized
-  		if (!this.source) {
-  			return;
-  		}
-  
-  		this.setupPanning();
-  	}
-  
-  	/**
-  	 * Set the pitch of the channel
-  	 * @param {number} pitch Pitch of the channel
-  	 */
-  	channel.setPitch = function (pitch) {
-  		this.pitch = pitch;
-  
-  		// Only update pitch if source is initialized
-  		if (!this.source) {
-  			return;
-  		}
-  
-  		this.source.setPitch(pitch);
-  	}
-  
-  	/**
-  	 * Set volume of channel
-  	 * @param {number} volume Volume of channel
-  	 */
-  	channel.setVolume = function (volume) {
-  		// Work around WebKit bug https://bugs.webkit.org/show_bug.cgi?id=222098
-  		// Updating volume only if it changes reduces sound distortion over time.
-  		// See case 1350204, 1348348 and 1352665
-  		if (this.gain.gain.value == volume) {
-  			return;
-  		}
-  
-  		this.gain.gain.value = volume;
-  	}
-  
-  	/**
-  	 * Set the 3D position of the audio channel
-  	 * @param {number} x
-  	 * @param {number} y
-  	 * @param {number} z
-  	 */
-  	channel.setPosition = function (x, y, z) {
-  		var p = this.panner;
-  
-  		// Work around Chrome performance bug https://bugs.chromium.org/p/chromium/issues/detail?id=1133233
-  		// by only updating the PannerNode position if it has changed.
-  		// See case 1270768.
-  		if (p.positionX) {
-  			// Use new properties if they exist ...
-  			if (p.positionX.value !== x) p.positionX.value = x;
-  			if (p.positionY.value !== y) p.positionY.value = y;
-  			if (p.positionZ.value !== z) p.positionZ.value = z;
-  		} else if (p._x !== x || p._y !== y || p._z !== z) {
-  			// ... or the deprecated set function if they don't (and shadow cache the set values to avoid re-setting later)
-  			p.setPosition(x, y, z);
-  			p._x = x;
-  			p._y = y;
-  			p._z = z;
-  		}
-  	}
-  
-  	/**
-  	 * Disconnect source node from graph
-  	 */
-  	channel.disconnectSource = function () {
-  		if (!this.source || this.source.isPausedMockNode) {
-  			return;
-  		}
-  
-  		if (this.source.mediaElement) {
-  			// Pause playback of media element
-  			this.source._pauseMediaElement();
-  		}
-  
-  		this.source.onended = null;
-  		this.source.disconnect();
-  		delete this.source;
-  	};
-  
-  	/**
-  	 * Changes this audio channel to either 3D panning or 2D mode (no panning)
-  	 */
-  	channel.setupPanning = function () {
-  		// We have a mocked paused object in effect?
-  		if (this.source.isPausedMockNode) return;
-  
-  		// Configure audio panning options either for 3D or 2D.
-  		this.source.disconnect();
-  		this.panner.disconnect();
-  		this.gain.disconnect();
-  		if (this.threeD) {
-  			// In 3D: AudioBufferSourceNode/MediaElementSourceNode -> PannerNode -> GainNode -> AudioContext.destination
-  			this.source.connect(this.panner);
-  			this.panner.connect(this.gain);
-  		} else {
-  			// In 2D: AudioBufferSourceNode/MediaElementSourceNode -> GainNode -> AudioContext.destination
-  			this.source.connect(this.gain);
-  		}
-  		this.gain.connect(WEBAudio.audioContext.destination);
-  	}
-  
-  	/**
-  	 * Returns wether playback on a channel is stopped.
-  	 * @returns {boolean} Returns true if playback on channel is stopped.
-  	 */
-  	 channel.isStopped = function () {
-  		if (!this.source) {
-  			// Uncompressed audio
-  			// No playback source -> channel is stopped
-  			return true;
-  		}
-  
-  		if (this.source.mediaElement) {
-  			// Compressed audio
-  			return this.source.isStopped;
-  		} 
-  
-  		return false;
-  	}
-  
-  	return channel;
-  }
-  function _JS_Sound_Create_Channel(callback, userData)
-  {
-  	if (WEBAudio.audioWebEnabled == 0)
-  		return;
-  
-  	WEBAudio.audioInstances[++WEBAudio.audioInstanceIdCounter] = jsAudioCreateChannel(callback, userData);
-  	return WEBAudio.audioInstanceIdCounter;
-  }
-
-  function _JS_Sound_GetLength(bufferInstance)
-  {
-  	if (WEBAudio.audioWebEnabled == 0)
-  		return 0;
-  
-  	var soundClip = WEBAudio.audioInstances[bufferInstance];
-  
-  	if (!soundClip)
-  		return 0;
-  
-  	return soundClip.getLength();
-  }
-
-  function _JS_Sound_GetLoadState(bufferInstance)
-  {
-  	if (WEBAudio.audioWebEnabled == 0)
-  		return 2;
-  
-  	var sound = WEBAudio.audioInstances[bufferInstance];
-  	if (sound.error)
-  		return 2;
-  	if (sound.buffer || sound.url)
-  		return 0;
-  	return 1;
-  }
-
-  function jsAudioPlayPendingBlockedAudio(soundId) {
-  	var pendingAudio = WEBAudio.pendingAudioSources[soundId];
-  	pendingAudio.sourceNode._startPlayback(pendingAudio.offset);
-  	delete WEBAudio.pendingAudioSources[soundId];
-  }
-  function jsAudioPlayBlockedAudios() {
-  	Object.keys(WEBAudio.pendingAudioSources).forEach(function (audioId) {
-  		jsAudioPlayPendingBlockedAudio(audioId);
-  	});
-  }
-  function _JS_Sound_Init() {
-  	try {
-  		window.AudioContext = window.AudioContext || window.webkitAudioContext;
-  		WEBAudio.audioContext = new AudioContext();
-  
-  		var tryToResumeAudioContext = function () {
-  			if (WEBAudio.audioContext.state === 'suspended')
-  				WEBAudio.audioContext.resume().catch(function (error) {
-  					console.warn("Could not resume audio context. Exception: " + error);
-  				});
-  			else
-  				Module.clearInterval(resumeInterval);
-  		};
-  		var resumeInterval = Module.setInterval(tryToResumeAudioContext, 400);
-  
-  		WEBAudio.audioWebEnabled = 1;
-  
-  		// Safari has the restriction where Audio elements need to be created from a direct user event,
-  		// even if the rest of the audio playback requirements is that a user event has happeend
-  		// at some point previously. The AudioContext also needs to be resumed, if paused, from a
-  		// direct user event. Catch user events here and use them to fill a cache of Audio
-  		// elements to be used by the rest of the system.
-  		var _userEventCallback = function () {
-  			try {
-  				// On Safari, resuming the audio context needs to happen from a user event.
-  				// The AudioContext is suspended by default, and on iOS if the user switches tabs
-  				// and comes back, it will be interrupted. Touching the page will resume audio
-  				// playback.
-  				if (WEBAudio.audioContext.state !== "running" && WEBAudio.audioContext.state !== "closed") {
-  					WEBAudio.audioContext.resume().catch(function (error) {
-  						console.warn("Could not resume audio context. Exception: " + error);
-  					});
-  				}
-  
-  				// Play blocked audio elements
-  				jsAudioPlayBlockedAudios();
-  
-  				// How many audio elements should we cache? How many compressed audio channels might
-  				// be played at a single time?
-  				var audioCacheSize = 20;
-  				while (WEBAudio.audioCache.length < audioCacheSize) {
-  					var audio = new Audio();
-  					audio.autoplay = false;
-  					WEBAudio.audioCache.push(audio);
-  				}
-  			} catch (e) {
-  				// Audio error, but don't need to notify here, they would have already been
-  				// informed of audio errors.
-  			}
-  		};
-  		window.addEventListener("mousedown", _userEventCallback);
-  		window.addEventListener("touchstart", _userEventCallback);
-  
-  		// Make sure we release the event listeners when the app quits to avoid leaking memory.
-  		Module.deinitializers.push(function () {
-  			window.removeEventListener("mousedown", _userEventCallback);
-  			window.removeEventListener("touchstart", _userEventCallback);
-  		});
-  	}
-  	catch (e) {
-  		alert('Web Audio API is not supported in this browser');
-  	}
-  }
-
-  function jsAudioCreateUncompressedSoundClipFromCompressedAudio(audioData) {
-  	var soundClip = jsAudioCreateUncompressedSoundClip(null, false);
-  
-  	WEBAudio.audioContext.decodeAudioData(
-  		audioData,
-  		function (_buffer) {
-  			soundClip.buffer = _buffer;
-  		},
-  		function (_error) {
-  			soundClip.error = true;
-  			console.log("Decode error: " + _error);
-  		}
-  	);
-  
-  	return soundClip;
-  }
-  
-  function jsAudioAddPendingBlockedAudio(sourceNode, offset) {
-  	WEBAudio.pendingAudioSources[sourceNode.mediaElement.src] = {
-  		sourceNode: sourceNode,
-  		offset: offset
-  	};
-  }
-  
-  function jsAudioGetMimeTypeFromType(fmodSoundType) {
-  	switch(fmodSoundType)
-  	{
-  		case 13: // FMOD_SOUND_TYPE_MPEG
-  			return "audio/mpeg";
-  		case 20: // FMOD_SOUND_TYPE_WAV
-  			return "audio/wav";
-  		default: // Fallback to mp4 audio file for other types or if not set (works on most browsers)
-  			return "audio/mp4";
-  	}
-  }
-  function jsAudioCreateCompressedSoundClip(audioData, fmodSoundType) {
-  	var mimeType = jsAudioGetMimeTypeFromType(fmodSoundType);
-  	var blob = new Blob([audioData], { type: mimeType });
-  
-  	var soundClip = {
-  		url: URL.createObjectURL(blob),
-  		error: false,
-  		mediaElement: new Audio()
-  	};
-  
-  	// An Audio element is created for the buffer so that we can access properties like duration
-  	// in JS_Sound_GetLength, which knows about the buffer object, but not the channel object.
-  	// This Audio element is used for metadata properties only, not for playback. Trying to play
-  	// back this Audio element would cause an error on Safari because it's not created in a
-  	// direct user event handler.
-  	soundClip.mediaElement.preload = "metadata";
-  	soundClip.mediaElement.src = soundClip.url;
-  
-  	/**
-  	 * Release resources of a sound clip
-  	 */
-  	soundClip.release = function () {
-  		if (!this.mediaElement) {
-  			return;
-  		}
-  
-  		this.mediaElement.src = "";
-  		URL.revokeObjectURL(this.url);
-  		delete this.mediaElement;
-  		delete this.url;
-  	}
-  
-  	/**
-  	 * Get length of sound clip in number of samples
-  	 * @returns {number}
-  	 */
-  	soundClip.getLength = function () {
-  		// Convert duration (seconds) to number of samples.
-  		return this.mediaElement.duration * 44100;
-  	}
-  	/**
-  	 * Gets uncompressed audio data from sound clip.
-  	 * If output buffer is smaller than the sound data only the first portion
-  	 * of the sound data is read.
-  	 * Sound clips with multiple channels will be stored one after the other.
-  	 *
-  	 * @param {number} ptr Pointer to the output buffer
-  	 * @param {number} length Size of output buffer in bytes
-  	 * @returns Size of data in bytes written to output buffer
-  	 */
-  	 soundClip.getData = function (ptr, length) {
-  		console.warn("getData() is not supported for compressed sound.");
-  
-  		return 0;
-  	}
-  
-  	/**
-  	 * Gets number of channels of soundclip
-  	 * @returns {number}
-  	 */
-  	soundClip.getNumberOfChannels = function () {
-  		console.warn("getNumberOfChannels() is not supported for compressed sound.");
-  
-  		return 0;
-  	}
-  
-  	/**
-  	 * Gets sampling rate in Hz
-  	 * @returns {number}
-  	 */
-  	soundClip.getFrequency = function () {
-  		console.warn("getFrequency() is not supported for compressed sound.");
-  
-  		return 0;
-  	}
-  
-  	/**
-  	 * Create an audio source node
-  	 * @returns {MediaElementAudioSourceNode}
-  	 */
-  	soundClip.createSourceNode = function () {
-  		var self = this;
-  		var mediaElement = WEBAudio.audioCache.length ? WEBAudio.audioCache.pop() : new Audio();;
-  		mediaElement.preload = "metadata";
-  		mediaElement.src = this.url;
-  		var source = WEBAudio.audioContext.createMediaElementSource(mediaElement);
-  
-  		Object.defineProperty(source, "loop", {
-  			get: function () {
-  				return source.mediaElement.loop;
-  			},
-  			set: function (v) {
-  				if (source.mediaElement.loop !== v) source.mediaElement.loop = v;
-  			}
-  		});
-  
-  		source.playbackRate = {};
-  		Object.defineProperty(source.playbackRate, "value", {
-  			get: function () {
-  				return source.mediaElement.playbackRate;
-  			},
-  			set: function (v) {
-  				if (source.mediaElement.playbackRate !== v) source.mediaElement.playbackRate = v;
-  			}
-  		});
-  		Object.defineProperty(source, "currentTime", {
-  			get: function () {
-  				return source.mediaElement.currentTime;
-  			},
-  			set: function (v) {
-  				if (source.mediaElement.currentTime !== v) source.mediaElement.currentTime = v;
-  			}
-  		});
-  		Object.defineProperty(source, "mute", {
-  			get: function () {
-  				return source.mediaElement.mute;
-  			},
-  			set: function (v) {
-  				if (source.mediaElement.mute !== v) source.mediaElement.mute = v;
-  			}
-  		});
-  		Object.defineProperty(source, "onended", {
-  			get: function () {
-  				return source.mediaElement.onended;
-  			},
-  			set: function (onended) {
-  				source.mediaElement.onended = onended;
-  			}
-  		});
-  
-  		source.playPromise = null;
-  		source.playTimeout = null;
-  		source.pauseRequested = false;
-  		source.isStopped = false;
-  
-  		source._pauseMediaElement = function () {
-  			// If there is a play request still pending, then pausing now would cause an
-  			// error. Instead, mark that we want the audio paused as soon as it can be,
-  			// which will be when the play promise resolves.
-  			if (source.playPromise || source.playTimeout) {
-  				source.pauseRequested = true;
-  			} else {
-  				// If there is no play request pending, we can pause immediately.
-  				source.mediaElement.pause();
-  			}
-  		};
-  
-  		source._startPlayback = function (offset) {
-  			if (source.playPromise || source.playTimeout) {
-  				source.mediaElement.currentTime = offset;
-  				source.pauseRequested = false;
-  				return;
-  			}
-  
-  			source.mediaElement.currentTime = offset;
-  			source.playPromise = source.mediaElement.play();
-  
-  			if (source.playPromise) {
-  				source.playPromise.then(function () {
-  					// If a pause was requested between play() and the MediaElement actually
-  					// starting, then pause it now.
-  					if (source.pauseRequested) {
-  						source.mediaElement.pause();
-  						source.pauseRequested = false;
-  					}
-  					source.playPromise = null;
-  				}).catch(function (error) {
-  					source.playPromise = null;
-  					if (error.name !== 'NotAllowedError')
-  						throw error;
-  
-  					// Playing a media element may fail if there was no previous user interaction
-  					// Retry playback when there was a user interaction
-  					jsAudioAddPendingBlockedAudio(source, offset);
-  				});
-  			}
-  		};
-  
-  		source.start = function (startTime, offset) {
-  			if (typeof startTime === "undefined") {
-  				startTime = WEBAudio.audioContext.currentTime;
-  			}
-  
-  			if (typeof offset === "undefined") {
-  				offset = 0.0;
-  			}
-  
-  			// Compare startTime to WEBAudio context currentTime, and if
-  			// startTime is more than about 4 msecs in the future, do a setTimeout() wait
-  			// for the remaining duration, and only then play. 4 msecs boundary because
-  			// setTimeout() is specced to throttle <= 4 msec waits if repeatedly called.
-  			var startDelayThresholdMS = 4;
-  			// Convert startTime and currentTime to milliseconds
-  			var startDelayMS = (startTime - WEBAudio.audioContext.currentTime) * 1000;
-  			if (startDelayMS > startDelayThresholdMS) {
-  				source.playTimeout = setTimeout(function () {
-  					source.playTimeout = null;
-  					source._startPlayback(offset);
-  				}, startDelayMS);
-  			} else {
-  				source._startPlayback(offset);
-  			}
-  		};
-  
-  		source.stop = function (stopTime) {
-  			if (typeof stopTime === "undefined") {
-  				stopTime = WEBAudio.audioContext.currentTime;
-  			}
-  
-  			// Compare stopTime to WEBAudio context currentTime, and if
-  			// stopTime is more than about 4 msecs in the future, do a setTimeout() wait
-  			// for the remaining duration, and only then stop. 4 msecs boundary because
-  			// setTimeout() is specced to throttle <= 4 msec waits if repeatedly called.
-  			var stopDelayThresholdMS = 4;
-  			// Convert startTime and currentTime to milliseconds
-  			var stopDelayMS = (stopTime - WEBAudio.audioContext.currentTime) * 1000;
-  
-  			if (stopDelayMS > stopDelayThresholdMS) {
-  				setTimeout(function () {
-  					source._pauseMediaElement();
-  					source.isStopped = true;
-  				}, stopDelayMS);
-  			} else {
-  				source._pauseMediaElement();
-  				source.isStopped = true;
-  			}
-  		};
-  
-  		jsAudioMixinSetPitch(source);
-  
-  		return source;
-  	}
-  
-  	return soundClip;
-  }
-  function _JS_Sound_Load(ptr, length, decompress, fmodSoundType) {
-  	if (WEBAudio.audioWebEnabled == 0)
-  		return 0;
-  
-  	var audioData = HEAPU8.buffer.slice(ptr, ptr + length);
-  
-  	// We don't ever want to play back really small audio clips as compressed, the compressor has a startup CPU cost,
-  	// and replaying the same audio clip multiple times (either individually or when looping) has an unwanted CPU
-  	// overhead if the same data will be decompressed on demand again and again. Hence we want to play back small
-  	// audio files always as fully uncompressed in memory.
-  
-  	// However this will be a memory usage tradeoff.
-  
-  	// Tests with aac audio sizes in a .m4a container shows:
-  	// 2.11MB stereo 44.1kHz .m4a file containing 90 seconds of 196kbps aac audio decompresses to 30.3MB of float32 PCM data. (~14.3x size increase)
-  	// 721KB stereo 44.1kHz .m4a file 29 seconds of 196kbps aac audio decompresses to 10.0MB of float32 PCM data. (~14x size increase)
-  	// 6.07KB mono 44.1kHZ .m4a file containing 1 second of 101kbps aac audio decompresses to 72kB of float32 PCM data. (~11x size increase)
-  	// -> overall AAC compression factor is ~10x-15x.
-  
-  	// Based on above, take 128KB as a cutoff size: if we have a .m4a clip that is smaller than this,
-  	// we always uncompress it up front, receiving at most ~1.8MB of raw audio data, which can hold about ~10 seconds of mono audio.
-  	// In other words, heuristically all audio clips <= mono ~10 seconds (5 seconds if stereo) in duration will be always fully uncompressed in memory.
-  	if (length < 131072) decompress = 1;
-  
-  	var sound;
-  	if (decompress) {
-  		sound = jsAudioCreateUncompressedSoundClipFromCompressedAudio(audioData);
-  	} else {
-  		sound = jsAudioCreateCompressedSoundClip(audioData, fmodSoundType);
-  	}
-  
-  	WEBAudio.audioInstances[++WEBAudio.audioInstanceIdCounter] = sound;
-  
-  	return WEBAudio.audioInstanceIdCounter;
-  }
-
-  function jsAudioCreateUncompressedSoundClipFromPCM(channels, length, sampleRate, ptr) {
-  	var buffer = WEBAudio.audioContext.createBuffer(channels, length, sampleRate);
-  
-  	// Copy audio data to buffer
-  	for (var i = 0; i < channels; i++) {
-  		var offs = (ptr >> 2) + length * i;
-  		var copyToChannel = buffer['copyToChannel'] || function (source, channelNumber, startInChannel) {
-  			// Shim for copyToChannel on browsers which don't support it like Safari.
-  			var clipped = source.subarray(0, Math.min(source.length, this.length - (startInChannel | 0)));
-  			this.getChannelData(channelNumber | 0).set(clipped, startInChannel | 0);
-  		};
-  		copyToChannel.apply(buffer, [HEAPF32.subarray(offs, offs + length), i, 0]);
-  	}
-  
-  	return jsAudioCreateUncompressedSoundClip(buffer, false);
-  }
-  function _JS_Sound_Load_PCM(channels, length, sampleRate, ptr) {
-  	if (WEBAudio.audioWebEnabled == 0)
-  		return 0;
-  
-  	var sound = jsAudioCreateUncompressedSoundClipFromPCM(channels, length, sampleRate, ptr);
-  
-  	WEBAudio.audioInstances[++WEBAudio.audioInstanceIdCounter] = sound;
-  	return WEBAudio.audioInstanceIdCounter;
-  }
-
-  function _JS_Sound_Play(bufferInstance, channelInstance, offset, delay)
-  {
-  	if (WEBAudio.audioWebEnabled == 0)
-  		return;
-  
-  	// stop sound clip which is currently playing in the channel.
-  	_JS_Sound_Stop(channelInstance, 0);
-  
-  	var soundClip = WEBAudio.audioInstances[bufferInstance];
-  	var channel = WEBAudio.audioInstances[channelInstance];
-  
-  	if (!soundClip) {
-  		console.log("Trying to play sound which is not loaded.");
-  		return;
-  	}
-  
-  	try {
-  		channel.playSoundClip(soundClip, WEBAudio.audioContext.currentTime + delay, offset);
-  	} catch (error) {
-  		console.error("playSoundClip error. Exception: " + e);
-  	}
-  }
-
-  function _JS_Sound_ReleaseInstance(instance) {
-  	var object = WEBAudio.audioInstances[instance];
-  	if (object) {
-  		object.release();
-  	}
-  
-  	// Let the GC free up the audio object.
-  	delete WEBAudio.audioInstances[instance];
-  }
-
   function _JS_Sound_ResumeIfNeeded()
   {
   	if (WEBAudio.audioWebEnabled == 0)
@@ -3943,143 +3221,6 @@ var ASM_CONSTS = {
   			console.warn("Could not resume audio context. Exception: " + error);
   		});
   
-  }
-
-  function _JS_Sound_Set3D(channelInstance, threeD)
-  {
-  	var channel = WEBAudio.audioInstances[channelInstance];
-  	channel.set3D(threeD);
-  }
-
-  function _JS_Sound_SetListenerOrientation(x, y, z, xUp, yUp, zUp)
-  {
-  	if (WEBAudio.audioWebEnabled == 0)
-  		return;
-  
-  	// Web Audio uses a RHS coordinate system, Unity uses LHS, causing orientations to be flipped.
-  	// So we pass a negative direction here to compensate, otherwise channels will be flipped.
-  	x = -x;
-  	y = -y;
-  	z = -z;
-  
-  	var l = WEBAudio.audioContext.listener;
-  
-  	// Do not re-set same values here if the orientation has not changed. This avoid unpredictable performance issues in Chrome
-  	// and Safari Web Audio implementations.
-  	if (l.forwardX) {
-  		// Use new properties if they exist ...
-  		if (l.forwardX.value !== x) l.forwardX.value = x;
-  		if (l.forwardY.value !== y) l.forwardY.value = y;
-  		if (l.forwardZ.value !== z) l.forwardZ.value = z;
-  
-  		if (l.upX.value !== xUp) l.upX.value = xUp;
-  		if (l.upY.value !== yUp) l.upY.value = yUp;
-  		if (l.upZ.value !== zUp) l.upZ.value = zUp;
-  	} else if (l._forwardX !== x || l._forwardY !== y || l._forwardZ !== z || l._upX !== xUp || l._upY !== yUp || l._upZ !== zUp) {
-  		// ... and old deprecated setOrientation if new properties are not supported.
-  		l.setOrientation(x, y, z, xUp, yUp, zUp);
-  		l._forwardX = x;
-  		l._forwardY = y;
-  		l._forwardZ = z;
-  		l._upX = xUp;
-  		l._upY = yUp;
-  		l._upZ = zUp;
-  	}
-  }
-
-  function _JS_Sound_SetListenerPosition(x, y, z)
-  {
-  	if (WEBAudio.audioWebEnabled == 0)
-  		return;
-  
-  	var l = WEBAudio.audioContext.listener;
-  
-  	// Do not re-set same values here if the orientation has not changed. This avoid unpredictable performance issues in Chrome
-  	// and Safari Web Audio implementations.
-  	if (l.positionX) {
-  		// Use new properties if they exist ...
-  		if (l.positionX.value !== x) l.positionX.value = x;
-  		if (l.positionY.value !== y) l.positionY.value = y;
-  		if (l.positionZ.value !== z) l.positionZ.value = z;
-  	} else if (l._positionX !== x || l._positionY !== y || l._positionZ !== z) {
-  		// ... and old deprecated setPosition if new properties are not supported.
-  		l.setPosition(x, y, z);
-  		l._positionX = x;
-  		l._positionY = y;
-  		l._positionZ = z;
-  	}
-  }
-
-  function _JS_Sound_SetLoop(channelInstance, loop)
-  {
-  	if (WEBAudio.audioWebEnabled == 0)
-  		return;
-  
-  	var channel = WEBAudio.audioInstances[channelInstance];
-  	channel.setLoop(loop);
-  }
-
-  function _JS_Sound_SetLoopPoints(channelInstance, loopStart, loopEnd)
-  {
-  	if (WEBAudio.audioWebEnabled == 0)
-  		return;
-  	var channel = WEBAudio.audioInstances[channelInstance];
-  	channel.setLoopPoints(loopStart, loopEnd);
-  }
-
-  function _JS_Sound_SetPaused(channelInstance, paused)
-  {
-  	if (WEBAudio.audioWebEnabled == 0)
-  		return;
-  	var channel = WEBAudio.audioInstances[channelInstance];
-  	if (paused != channel.isPaused()) {
-  		if (paused) channel.pause();
-  		else channel.resume();
-  	}
-  }
-
-  function _JS_Sound_SetPitch(channelInstance, v)
-  {
-  	if (WEBAudio.audioWebEnabled == 0)
-  		return;
-  
-  	try {
-  		var channel = WEBAudio.audioInstances[channelInstance];
-  		channel.setPitch(v);
-  	} catch (e) {
-  		console.error('JS_Sound_SetPitch(channel=' + channelInstance + ', pitch=' + v + ') threw an exception: ' + e);
-  	}
-  }
-
-  function _JS_Sound_SetPosition(channelInstance, x, y, z)
-  {
-  	if (WEBAudio.audioWebEnabled == 0)
-  		return;
-  
-  	var channel = WEBAudio.audioInstances[channelInstance];
-  	channel.setPosition(x, y, z);
-  }
-
-  function _JS_Sound_SetVolume(channelInstance, v)
-  {
-  	if (WEBAudio.audioWebEnabled == 0)
-  		return;
-  
-  	try {
-  		var channel = WEBAudio.audioInstances[channelInstance];
-  		channel.setVolume(v);
-  	} catch (e) {
-  		console.error('JS_Sound_SetVolume(channel=' + channelInstance + ', volume=' + v + ') threw an exception: ' + e);
-  	}
-  }
-
-  function _JS_Sound_Stop(channelInstance, delay)
-  {
-  	if (WEBAudio.audioWebEnabled == 0)
-  		return;
-  
-  	var channel = WEBAudio.audioInstances[channelInstance];
-  	channel.stop(delay);
   }
 
   function _JS_SystemInfo_GetCanvasClientSize(domElementSelector, outWidth, outHeight)
@@ -4175,333 +3316,21 @@ var ASM_CONSTS = {
       abort('Assertion failed: ' + UTF8ToString(condition) + ', at: ' + [filename ? UTF8ToString(filename) : 'unknown filename', line, func ? UTF8ToString(func) : 'unknown function']);
     }
 
-  function ___cxa_allocate_exception(size) {
-      // Thrown object is prepended by exception metadata block
-      return _malloc(size + 16) + 16;
-    }
+  function ___cxa_allocate_exception() { abort(); }
 
-  /** @constructor */
-  function ExceptionInfo(excPtr) {
-      this.excPtr = excPtr;
-      this.ptr = excPtr - 16;
-  
-      this.set_type = function(type) {
-        HEAP32[(((this.ptr)+(4))>>2)] = type;
-      };
-  
-      this.get_type = function() {
-        return HEAP32[(((this.ptr)+(4))>>2)];
-      };
-  
-      this.set_destructor = function(destructor) {
-        HEAP32[(((this.ptr)+(8))>>2)] = destructor;
-      };
-  
-      this.get_destructor = function() {
-        return HEAP32[(((this.ptr)+(8))>>2)];
-      };
-  
-      this.set_refcount = function(refcount) {
-        HEAP32[((this.ptr)>>2)] = refcount;
-      };
-  
-      this.set_caught = function (caught) {
-        caught = caught ? 1 : 0;
-        HEAP8[(((this.ptr)+(12))>>0)] = caught;
-      };
-  
-      this.get_caught = function () {
-        return HEAP8[(((this.ptr)+(12))>>0)] != 0;
-      };
-  
-      this.set_rethrown = function (rethrown) {
-        rethrown = rethrown ? 1 : 0;
-        HEAP8[(((this.ptr)+(13))>>0)] = rethrown;
-      };
-  
-      this.get_rethrown = function () {
-        return HEAP8[(((this.ptr)+(13))>>0)] != 0;
-      };
-  
-      // Initialize native structure fields. Should be called once after allocated.
-      this.init = function(type, destructor) {
-        this.set_type(type);
-        this.set_destructor(destructor);
-        this.set_refcount(0);
-        this.set_caught(false);
-        this.set_rethrown(false);
-      }
-  
-      this.add_ref = function() {
-        var value = HEAP32[((this.ptr)>>2)];
-        HEAP32[((this.ptr)>>2)] = value + 1;
-      };
-  
-      // Returns true if last reference released.
-      this.release_ref = function() {
-        var prev = HEAP32[((this.ptr)>>2)];
-        HEAP32[((this.ptr)>>2)] = prev - 1;
-        assert(prev > 0);
-        return prev === 1;
-      };
-    }
-  
-    /**
-     * @constructor
-     * @param {number=} ptr
-     */
-  function CatchInfo(ptr) {
-  
-      this.free = function() {
-        _free(this.ptr);
-        this.ptr = 0;
-      };
-  
-      this.set_base_ptr = function(basePtr) {
-        HEAP32[((this.ptr)>>2)] = basePtr;
-      };
-  
-      this.get_base_ptr = function() {
-        return HEAP32[((this.ptr)>>2)];
-      };
-  
-      this.set_adjusted_ptr = function(adjustedPtr) {
-        HEAP32[(((this.ptr)+(4))>>2)] = adjustedPtr;
-      };
-  
-      this.get_adjusted_ptr_addr = function() {
-        return this.ptr + 4;
-      }
-  
-      this.get_adjusted_ptr = function() {
-        return HEAP32[(((this.ptr)+(4))>>2)];
-      };
-  
-      // Get pointer which is expected to be received by catch clause in C++ code. It may be adjusted
-      // when the pointer is casted to some of the exception object base classes (e.g. when virtual
-      // inheritance is used). When a pointer is thrown this method should return the thrown pointer
-      // itself.
-      this.get_exception_ptr = function() {
-        // Work around a fastcomp bug, this code is still included for some reason in a build without
-        // exceptions support.
-        var isPointer = ___cxa_is_pointer_type(
-          this.get_exception_info().get_type());
-        if (isPointer) {
-          return HEAP32[((this.get_base_ptr())>>2)];
-        }
-        var adjusted = this.get_adjusted_ptr();
-        if (adjusted !== 0) return adjusted;
-        return this.get_base_ptr();
-      };
-  
-      this.get_exception_info = function() {
-        return new ExceptionInfo(this.get_base_ptr());
-      };
-  
-      if (ptr === undefined) {
-        this.ptr = _malloc(8);
-        this.set_adjusted_ptr(0);
-      } else {
-        this.ptr = ptr;
-      }
-    }
-  
-  var exceptionCaught =  [];
-  
-  function exception_addRef(info) {
-      info.add_ref();
-    }
-  
-  var uncaughtExceptionCount = 0;
-  function ___cxa_begin_catch(ptr) {
-      var catchInfo = new CatchInfo(ptr);
-      var info = catchInfo.get_exception_info();
-      if (!info.get_caught()) {
-        info.set_caught(true);
-        uncaughtExceptionCount--;
-      }
-      info.set_rethrown(false);
-      exceptionCaught.push(catchInfo);
-      exception_addRef(info);
-      return catchInfo.get_exception_ptr();
-    }
+  function ___cxa_begin_catch() { abort(); }
 
-  var exceptionLast = 0;
-  
-  function ___cxa_free_exception(ptr) {
-      try {
-        return _free(new ExceptionInfo(ptr).ptr);
-      } catch(e) {
-        err('exception during cxa_free_exception: ' + e);
-      }
-    }
-  function exception_decRef(info) {
-      // A rethrown exception can reach refcount 0; it must not be discarded
-      // Its next handler will clear the rethrown flag and addRef it, prior to
-      // final decRef and destruction here
-      if (info.release_ref() && !info.get_rethrown()) {
-        var destructor = info.get_destructor();
-        if (destructor) {
-          // In Wasm, destructors return 'this' as in ARM
-          (function(a1) { return dynCall_ii.apply(null, [destructor, a1]); })(info.excPtr);
-        }
-        ___cxa_free_exception(info.excPtr);
-      }
-    }
-  function ___cxa_end_catch() {
-      // Clear state flag.
-      _setThrew(0);
-      assert(exceptionCaught.length > 0);
-      // Call destructor if one is registered then clear it.
-      var catchInfo = exceptionCaught.pop();
-  
-      exception_decRef(catchInfo.get_exception_info());
-      catchInfo.free();
-      exceptionLast = 0; // XXX in decRef?
-    }
+  function ___cxa_end_catch() { abort(); }
 
-  function ___resumeException(catchInfoPtr) {
-      var catchInfo = new CatchInfo(catchInfoPtr);
-      var ptr = catchInfo.get_base_ptr();
-      if (!exceptionLast) { exceptionLast = ptr; }
-      catchInfo.free();
-      throw ptr;
-    }
-  function ___cxa_find_matching_catch_2() {
-      var thrown = exceptionLast;
-      if (!thrown) {
-        // just pass through the null ptr
-        setTempRet0(0); return ((0)|0);
-      }
-      var info = new ExceptionInfo(thrown);
-      var thrownType = info.get_type();
-      var catchInfo = new CatchInfo();
-      catchInfo.set_base_ptr(thrown);
-      catchInfo.set_adjusted_ptr(thrown);
-      if (!thrownType) {
-        // just pass through the thrown ptr
-        setTempRet0(0); return ((catchInfo.ptr)|0);
-      }
-      var typeArray = Array.prototype.slice.call(arguments);
-  
-      // can_catch receives a **, add indirection
-      // The different catch blocks are denoted by different types.
-      // Due to inheritance, those types may not precisely match the
-      // type of the thrown object. Find one which matches, and
-      // return the type of the catch block which should be called.
-      for (var i = 0; i < typeArray.length; i++) {
-        var caughtType = typeArray[i];
-        if (caughtType === 0 || caughtType === thrownType) {
-          // Catch all clause matched or exactly the same type is caught
-          break;
-        }
-        if (___cxa_can_catch(caughtType, thrownType, catchInfo.get_adjusted_ptr_addr())) {
-          setTempRet0(caughtType); return ((catchInfo.ptr)|0);
-        }
-      }
-      setTempRet0(thrownType); return ((catchInfo.ptr)|0);
-    }
+  function ___cxa_find_matching_catch_2() { abort(); }
 
-  function ___cxa_find_matching_catch_3() {
-      var thrown = exceptionLast;
-      if (!thrown) {
-        // just pass through the null ptr
-        setTempRet0(0); return ((0)|0);
-      }
-      var info = new ExceptionInfo(thrown);
-      var thrownType = info.get_type();
-      var catchInfo = new CatchInfo();
-      catchInfo.set_base_ptr(thrown);
-      catchInfo.set_adjusted_ptr(thrown);
-      if (!thrownType) {
-        // just pass through the thrown ptr
-        setTempRet0(0); return ((catchInfo.ptr)|0);
-      }
-      var typeArray = Array.prototype.slice.call(arguments);
-  
-      // can_catch receives a **, add indirection
-      // The different catch blocks are denoted by different types.
-      // Due to inheritance, those types may not precisely match the
-      // type of the thrown object. Find one which matches, and
-      // return the type of the catch block which should be called.
-      for (var i = 0; i < typeArray.length; i++) {
-        var caughtType = typeArray[i];
-        if (caughtType === 0 || caughtType === thrownType) {
-          // Catch all clause matched or exactly the same type is caught
-          break;
-        }
-        if (___cxa_can_catch(caughtType, thrownType, catchInfo.get_adjusted_ptr_addr())) {
-          setTempRet0(caughtType); return ((catchInfo.ptr)|0);
-        }
-      }
-      setTempRet0(thrownType); return ((catchInfo.ptr)|0);
-    }
+  function ___cxa_find_matching_catch_3() { abort(); }
 
-  function ___cxa_find_matching_catch_4() {
-      var thrown = exceptionLast;
-      if (!thrown) {
-        // just pass through the null ptr
-        setTempRet0(0); return ((0)|0);
-      }
-      var info = new ExceptionInfo(thrown);
-      var thrownType = info.get_type();
-      var catchInfo = new CatchInfo();
-      catchInfo.set_base_ptr(thrown);
-      catchInfo.set_adjusted_ptr(thrown);
-      if (!thrownType) {
-        // just pass through the thrown ptr
-        setTempRet0(0); return ((catchInfo.ptr)|0);
-      }
-      var typeArray = Array.prototype.slice.call(arguments);
-  
-      // can_catch receives a **, add indirection
-      // The different catch blocks are denoted by different types.
-      // Due to inheritance, those types may not precisely match the
-      // type of the thrown object. Find one which matches, and
-      // return the type of the catch block which should be called.
-      for (var i = 0; i < typeArray.length; i++) {
-        var caughtType = typeArray[i];
-        if (caughtType === 0 || caughtType === thrownType) {
-          // Catch all clause matched or exactly the same type is caught
-          break;
-        }
-        if (___cxa_can_catch(caughtType, thrownType, catchInfo.get_adjusted_ptr_addr())) {
-          setTempRet0(caughtType); return ((catchInfo.ptr)|0);
-        }
-      }
-      setTempRet0(thrownType); return ((catchInfo.ptr)|0);
-    }
+  function ___cxa_find_matching_catch_4() { abort(); }
 
+  function ___cxa_throw() { abort(); }
 
-  function ___cxa_rethrow() {
-      var catchInfo = exceptionCaught.pop();
-      if (!catchInfo) {
-        abort('no exception to throw');
-      }
-      var info = catchInfo.get_exception_info();
-      var ptr = catchInfo.get_base_ptr();
-      if (!info.get_rethrown()) {
-        // Only pop if the corresponding push was through rethrow_primary_exception
-        exceptionCaught.push(catchInfo);
-        info.set_rethrown(true);
-        info.set_caught(false);
-        uncaughtExceptionCount++;
-      } else {
-        catchInfo.free();
-      }
-      exceptionLast = ptr;
-      throw ptr;
-    }
-
-  function ___cxa_throw(ptr, type, destructor) {
-      var info = new ExceptionInfo(ptr);
-      // Initialize ExceptionInfo content after it was allocated in __cxa_allocate_exception.
-      info.init(type, destructor);
-      exceptionLast = ptr;
-      uncaughtExceptionCount++;
-      throw ptr;
-    }
-
+  function ___resumeException() { abort(); }
 
   var PATH = {splitPath:function(filename) {
         var splitPathRe = /^(\/?|)([\s\S]*?)((?:\.{1,2}|[^\/]+?|)(\.[^.\/]*|))(?:[\/]*)$/;
@@ -8603,6 +7432,8 @@ var ASM_CONSTS = {
       return nowIsMonotonic;
     }
 
+  function __emscripten_throw_longjmp() { throw Infinity; }
+
   function __gmtime_js(time, tmPtr) {
       var date = new Date(HEAP32[((time)>>2)]*1000);
       HEAP32[((tmPtr)>>2)] = date.getUTCSeconds();
@@ -8759,21 +7590,6 @@ var ASM_CONSTS = {
   function _abort() {
       abort('native code called abort()');
     }
-
-  function _deleteAllKeys(prefix){
-          var len = localStorage.length;
-          for (var i = 0; i < len; i++ ) {
-              var key = localStorage.key(i);
-              if(key != null && key.startsWith(UTF8ToString(prefix))){
-                  localStorage.removeItem(key);
-                  i--;
-              }
-          }
-      }
-
-  function _deleteKey(yourkey){
-          localStorage.removeItem(UTF8ToString(yourkey));
-      }
 
   var readAsmConstArgsArray = [];
   function readAsmConstArgs(sigPtr, buf) {
@@ -14070,22 +12886,7 @@ var ASM_CONSTS = {
 
   function _glViewport(x0, x1, x2, x3) { GLctx['viewport'](x0, x1, x2, x3) }
 
-  function _llvm_eh_typeid_for(type) {
-      return type;
-    }
-
-  function _loadData(yourkey){
-          var returnStr = "";
-          if(localStorage.getItem(UTF8ToString(yourkey)) !==null)
-          {
-              returnStr = localStorage.getItem(UTF8ToString(yourkey));
-          }
-  
-          var bufferSize = lengthBytesUTF8(returnStr) + 1;
-          var buffer = _malloc(bufferSize);
-          stringToUTF8(returnStr, buffer, bufferSize);
-          return buffer;
-      }
+  function _llvm_eh_typeid_for() { abort(); }
 
   function _saveData(yourkey, yourdata){
           localStorage.setItem(UTF8ToString(yourkey), UTF8ToString(yourdata));
@@ -14655,6 +13456,7 @@ var asmLibraryArg = {
   "JS_Cursor_SetShow": _JS_Cursor_SetShow,
   "JS_DOM_MapViewportCoordinateToElementLocalCoordinate": _JS_DOM_MapViewportCoordinateToElementLocalCoordinate,
   "JS_DOM_UnityCanvasSelector": _JS_DOM_UnityCanvasSelector,
+  "JS_Eval_OpenURL": _JS_Eval_OpenURL,
   "JS_FileSystem_Initialize": _JS_FileSystem_Initialize,
   "JS_FileSystem_Sync": _JS_FileSystem_Sync,
   "JS_GravitySensor_IsRunning": _JS_GravitySensor_IsRunning,
@@ -14670,6 +13472,14 @@ var asmLibraryArg = {
   "JS_Log_Dump": _JS_Log_Dump,
   "JS_Log_StackTrace": _JS_Log_StackTrace,
   "JS_MobileKeybard_GetIgnoreBlurEvent": _JS_MobileKeybard_GetIgnoreBlurEvent,
+  "JS_MobileKeyboard_GetKeyboardStatus": _JS_MobileKeyboard_GetKeyboardStatus,
+  "JS_MobileKeyboard_GetText": _JS_MobileKeyboard_GetText,
+  "JS_MobileKeyboard_GetTextSelection": _JS_MobileKeyboard_GetTextSelection,
+  "JS_MobileKeyboard_Hide": _JS_MobileKeyboard_Hide,
+  "JS_MobileKeyboard_SetCharacterLimit": _JS_MobileKeyboard_SetCharacterLimit,
+  "JS_MobileKeyboard_SetText": _JS_MobileKeyboard_SetText,
+  "JS_MobileKeyboard_SetTextSelection": _JS_MobileKeyboard_SetTextSelection,
+  "JS_MobileKeyboard_Show": _JS_MobileKeyboard_Show,
   "JS_OrientationSensor_IsRunning": _JS_OrientationSensor_IsRunning,
   "JS_OrientationSensor_Start": _JS_OrientationSensor_Start,
   "JS_OrientationSensor_Stop": _JS_OrientationSensor_Stop,
@@ -14679,25 +13489,7 @@ var asmLibraryArg = {
   "JS_ScreenOrientation_DeInit": _JS_ScreenOrientation_DeInit,
   "JS_ScreenOrientation_Init": _JS_ScreenOrientation_Init,
   "JS_ScreenOrientation_Lock": _JS_ScreenOrientation_Lock,
-  "JS_Sound_Create_Channel": _JS_Sound_Create_Channel,
-  "JS_Sound_GetLength": _JS_Sound_GetLength,
-  "JS_Sound_GetLoadState": _JS_Sound_GetLoadState,
-  "JS_Sound_Init": _JS_Sound_Init,
-  "JS_Sound_Load": _JS_Sound_Load,
-  "JS_Sound_Load_PCM": _JS_Sound_Load_PCM,
-  "JS_Sound_Play": _JS_Sound_Play,
-  "JS_Sound_ReleaseInstance": _JS_Sound_ReleaseInstance,
   "JS_Sound_ResumeIfNeeded": _JS_Sound_ResumeIfNeeded,
-  "JS_Sound_Set3D": _JS_Sound_Set3D,
-  "JS_Sound_SetListenerOrientation": _JS_Sound_SetListenerOrientation,
-  "JS_Sound_SetListenerPosition": _JS_Sound_SetListenerPosition,
-  "JS_Sound_SetLoop": _JS_Sound_SetLoop,
-  "JS_Sound_SetLoopPoints": _JS_Sound_SetLoopPoints,
-  "JS_Sound_SetPaused": _JS_Sound_SetPaused,
-  "JS_Sound_SetPitch": _JS_Sound_SetPitch,
-  "JS_Sound_SetPosition": _JS_Sound_SetPosition,
-  "JS_Sound_SetVolume": _JS_Sound_SetVolume,
-  "JS_Sound_Stop": _JS_Sound_Stop,
   "JS_SystemInfo_GetCanvasClientSize": _JS_SystemInfo_GetCanvasClientSize,
   "JS_SystemInfo_GetDocumentURL": _JS_SystemInfo_GetDocumentURL,
   "JS_SystemInfo_GetGPUInfo": _JS_SystemInfo_GetGPUInfo,
@@ -14718,8 +13510,6 @@ var asmLibraryArg = {
   "__cxa_find_matching_catch_2": ___cxa_find_matching_catch_2,
   "__cxa_find_matching_catch_3": ___cxa_find_matching_catch_3,
   "__cxa_find_matching_catch_4": ___cxa_find_matching_catch_4,
-  "__cxa_free_exception": ___cxa_free_exception,
-  "__cxa_rethrow": ___cxa_rethrow,
   "__cxa_throw": ___cxa_throw,
   "__resumeException": ___resumeException,
   "__syscall__newselect": ___syscall__newselect,
@@ -14752,6 +13542,7 @@ var asmLibraryArg = {
   "_dlsym_js": __dlsym_js,
   "_emscripten_date_now": __emscripten_date_now,
   "_emscripten_get_now_is_monotonic": __emscripten_get_now_is_monotonic,
+  "_emscripten_throw_longjmp": __emscripten_throw_longjmp,
   "_gmtime_js": __gmtime_js,
   "_localtime_js": __localtime_js,
   "_mktime_js": __mktime_js,
@@ -14759,8 +13550,6 @@ var asmLibraryArg = {
   "_munmap_js": __munmap_js,
   "_tzset_js": __tzset_js,
   "abort": _abort,
-  "deleteAllKeys": _deleteAllKeys,
-  "deleteKey": _deleteKey,
   "emscripten_asm_const_int": _emscripten_asm_const_int,
   "emscripten_asm_const_int_sync_on_main_thread": _emscripten_asm_const_int_sync_on_main_thread,
   "emscripten_cancel_main_loop": _emscripten_cancel_main_loop,
@@ -14978,11 +13767,21 @@ var asmLibraryArg = {
   "glVertexAttribIPointer": _glVertexAttribIPointer,
   "glVertexAttribPointer": _glVertexAttribPointer,
   "glViewport": _glViewport,
+  "invoke_ddiii": invoke_ddiii,
   "invoke_dii": invoke_dii,
+  "invoke_diii": invoke_diii,
+  "invoke_fffi": invoke_fffi,
+  "invoke_fi": invoke_fi,
+  "invoke_fii": invoke_fii,
+  "invoke_fiii": invoke_fiii,
   "invoke_i": invoke_i,
   "invoke_ii": invoke_ii,
+  "invoke_iifi": invoke_iifi,
   "invoke_iii": invoke_iii,
+  "invoke_iiifi": invoke_iiifi,
+  "invoke_iiifii": invoke_iiifii,
   "invoke_iiii": invoke_iiii,
+  "invoke_iiiidii": invoke_iiiidii,
   "invoke_iiiii": invoke_iiiii,
   "invoke_iiiiii": invoke_iiiiii,
   "invoke_iiiiiii": invoke_iiiiiii,
@@ -14990,15 +13789,20 @@ var asmLibraryArg = {
   "invoke_iiiiiiiii": invoke_iiiiiiiii,
   "invoke_iiiiiiiiii": invoke_iiiiiiiiii,
   "invoke_iiiiiiiiiii": invoke_iiiiiiiiiii,
+  "invoke_iiiiiiiiiiii": invoke_iiiiiiiiiiii,
+  "invoke_iiiiiiiiiji": invoke_iiiiiiiiiji,
   "invoke_iiiijii": invoke_iiiijii,
+  "invoke_iiijii": invoke_iiijii,
   "invoke_iiijiii": invoke_iiijiii,
   "invoke_iij": invoke_iij,
   "invoke_iiji": invoke_iiji,
   "invoke_iijii": invoke_iijii,
+  "invoke_iijiii": invoke_iijiii,
   "invoke_iijji": invoke_iijji,
   "invoke_iji": invoke_iji,
   "invoke_ijji": invoke_ijji,
   "invoke_j": invoke_j,
+  "invoke_ji": invoke_ji,
   "invoke_jii": invoke_jii,
   "invoke_jiii": invoke_jiii,
   "invoke_jiiiii": invoke_jiiiii,
@@ -15008,23 +13812,33 @@ var asmLibraryArg = {
   "invoke_jjji": invoke_jjji,
   "invoke_v": invoke_v,
   "invoke_vi": invoke_vi,
+  "invoke_vidi": invoke_vidi,
+  "invoke_viffi": invoke_viffi,
+  "invoke_vifi": invoke_vifi,
+  "invoke_vifii": invoke_vifii,
   "invoke_vii": invoke_vii,
+  "invoke_viidi": invoke_viidi,
+  "invoke_viiffi": invoke_viiffi,
   "invoke_viifi": invoke_viifi,
+  "invoke_viifii": invoke_viifii,
   "invoke_viii": invoke_viii,
   "invoke_viiii": invoke_viiii,
+  "invoke_viiiifi": invoke_viiiifi,
   "invoke_viiiii": invoke_viiiii,
   "invoke_viiiiii": invoke_viiiiii,
   "invoke_viiiiiii": invoke_viiiiiii,
   "invoke_viiiiiiii": invoke_viiiiiiii,
   "invoke_viiiiiiiii": invoke_viiiiiiiii,
   "invoke_viiiiiiiiii": invoke_viiiiiiiiii,
+  "invoke_viiiji": invoke_viiiji,
   "invoke_viiji": invoke_viiji,
   "invoke_viji": invoke_viji,
+  "invoke_vijii": invoke_vijii,
   "invoke_vijiii": invoke_vijiii,
+  "invoke_vji": invoke_vji,
   "invoke_vjiiiii": invoke_vjiiiii,
   "invoke_vjjjiiii": invoke_vjjjiiii,
   "llvm_eh_typeid_for": _llvm_eh_typeid_for,
-  "loadData": _loadData,
   "saveData": _saveData,
   "setTempRet0": _setTempRet0,
   "strftime": _strftime
@@ -15168,10 +13982,10 @@ var dynCall_viiiiii = Module["dynCall_viiiiii"] = createExportWrapper("dynCall_v
 var dynCall_viiiii = Module["dynCall_viiiii"] = createExportWrapper("dynCall_viiiii");
 
 /** @type {function(...*):?} */
-var dynCall_iiiiii = Module["dynCall_iiiiii"] = createExportWrapper("dynCall_iiiiii");
+var dynCall_i = Module["dynCall_i"] = createExportWrapper("dynCall_i");
 
 /** @type {function(...*):?} */
-var dynCall_i = Module["dynCall_i"] = createExportWrapper("dynCall_i");
+var dynCall_iiiiii = Module["dynCall_iiiiii"] = createExportWrapper("dynCall_iiiiii");
 
 /** @type {function(...*):?} */
 var dynCall_iiiiiiii = Module["dynCall_iiiiiiii"] = createExportWrapper("dynCall_iiiiiiii");
@@ -15192,34 +14006,160 @@ var dynCall_jii = Module["dynCall_jii"] = createExportWrapper("dynCall_jii");
 var dynCall_viiiiiiii = Module["dynCall_viiiiiiii"] = createExportWrapper("dynCall_viiiiiiii");
 
 /** @type {function(...*):?} */
-var dynCall_viiiiiii = Module["dynCall_viiiiiii"] = createExportWrapper("dynCall_viiiiiii");
+var dynCall_viifi = Module["dynCall_viifi"] = createExportWrapper("dynCall_viifi");
 
 /** @type {function(...*):?} */
-var dynCall_viiiiiiiiii = Module["dynCall_viiiiiiiiii"] = createExportWrapper("dynCall_viiiiiiiiii");
+var dynCall_iiifii = Module["dynCall_iiifii"] = createExportWrapper("dynCall_iiifii");
 
 /** @type {function(...*):?} */
-var dynCall_iijji = Module["dynCall_iijji"] = createExportWrapper("dynCall_iijji");
+var dynCall_viiji = Module["dynCall_viiji"] = createExportWrapper("dynCall_viiji");
+
+/** @type {function(...*):?} */
+var dynCall_iiijii = Module["dynCall_iiijii"] = createExportWrapper("dynCall_iiijii");
+
+/** @type {function(...*):?} */
+var dynCall_iiiidii = Module["dynCall_iiiidii"] = createExportWrapper("dynCall_iiiidii");
+
+/** @type {function(...*):?} */
+var dynCall_vidi = Module["dynCall_vidi"] = createExportWrapper("dynCall_vidi");
+
+/** @type {function(...*):?} */
+var dynCall_viidi = Module["dynCall_viidi"] = createExportWrapper("dynCall_viidi");
 
 /** @type {function(...*):?} */
 var dynCall_iiiijii = Module["dynCall_iiiijii"] = createExportWrapper("dynCall_iiiijii");
 
 /** @type {function(...*):?} */
-var dynCall_iiiiiiiii = Module["dynCall_iiiiiiiii"] = createExportWrapper("dynCall_iiiiiiiii");
+var dynCall_vijii = Module["dynCall_vijii"] = createExportWrapper("dynCall_vijii");
+
+/** @type {function(...*):?} */
+var dynCall_iijiii = Module["dynCall_iijiii"] = createExportWrapper("dynCall_iijiii");
+
+/** @type {function(...*):?} */
+var dynCall_iiiiiiiiii = Module["dynCall_iiiiiiiiii"] = createExportWrapper("dynCall_iiiiiiiiii");
+
+/** @type {function(...*):?} */
+var dynCall_fii = Module["dynCall_fii"] = createExportWrapper("dynCall_fii");
+
+/** @type {function(...*):?} */
+var dynCall_iiiiiiiiiiii = Module["dynCall_iiiiiiiiiiii"] = createExportWrapper("dynCall_iiiiiiiiiiii");
+
+/** @type {function(...*):?} */
+var dynCall_iifi = Module["dynCall_iifi"] = createExportWrapper("dynCall_iifi");
+
+/** @type {function(...*):?} */
+var dynCall_viiiiiiiiii = Module["dynCall_viiiiiiiiii"] = createExportWrapper("dynCall_viiiiiiiiii");
+
+/** @type {function(...*):?} */
+var dynCall_iiiiiiiiiji = Module["dynCall_iiiiiiiiiji"] = createExportWrapper("dynCall_iiiiiiiiiji");
+
+/** @type {function(...*):?} */
+var dynCall_vji = Module["dynCall_vji"] = createExportWrapper("dynCall_vji");
+
+/** @type {function(...*):?} */
+var dynCall_fiii = Module["dynCall_fiii"] = createExportWrapper("dynCall_fiii");
+
+/** @type {function(...*):?} */
+var dynCall_iiiifi = Module["dynCall_iiiifi"] = createExportWrapper("dynCall_iiiifi");
+
+/** @type {function(...*):?} */
+var dynCall_fffi = Module["dynCall_fffi"] = createExportWrapper("dynCall_fffi");
+
+/** @type {function(...*):?} */
+var dynCall_viifii = Module["dynCall_viifii"] = createExportWrapper("dynCall_viifii");
 
 /** @type {function(...*):?} */
 var dynCall_vifi = Module["dynCall_vifi"] = createExportWrapper("dynCall_vifi");
 
 /** @type {function(...*):?} */
-var dynCall_jiii = Module["dynCall_jiii"] = createExportWrapper("dynCall_jiii");
+var dynCall_vifii = Module["dynCall_vifii"] = createExportWrapper("dynCall_vifii");
 
 /** @type {function(...*):?} */
-var dynCall_ijji = Module["dynCall_ijji"] = createExportWrapper("dynCall_ijji");
+var dynCall_iiiifii = Module["dynCall_iiiifii"] = createExportWrapper("dynCall_iiiifii");
+
+/** @type {function(...*):?} */
+var dynCall_viiiifii = Module["dynCall_viiiifii"] = createExportWrapper("dynCall_viiiifii");
+
+/** @type {function(...*):?} */
+var dynCall_viiffi = Module["dynCall_viiffi"] = createExportWrapper("dynCall_viiffi");
+
+/** @type {function(...*):?} */
+var dynCall_fi = Module["dynCall_fi"] = createExportWrapper("dynCall_fi");
+
+/** @type {function(...*):?} */
+var dynCall_iiifi = Module["dynCall_iiifi"] = createExportWrapper("dynCall_iiifi");
+
+/** @type {function(...*):?} */
+var dynCall_viiiifi = Module["dynCall_viiiifi"] = createExportWrapper("dynCall_viiiifi");
+
+/** @type {function(...*):?} */
+var dynCall_fiiffi = Module["dynCall_fiiffi"] = createExportWrapper("dynCall_fiiffi");
+
+/** @type {function(...*):?} */
+var dynCall_viiififii = Module["dynCall_viiififii"] = createExportWrapper("dynCall_viiififii");
+
+/** @type {function(...*):?} */
+var dynCall_ji = Module["dynCall_ji"] = createExportWrapper("dynCall_ji");
+
+/** @type {function(...*):?} */
+var dynCall_viiiiiii = Module["dynCall_viiiiiii"] = createExportWrapper("dynCall_viiiiiii");
+
+/** @type {function(...*):?} */
+var dynCall_iidi = Module["dynCall_iidi"] = createExportWrapper("dynCall_iidi");
+
+/** @type {function(...*):?} */
+var dynCall_iiddi = Module["dynCall_iiddi"] = createExportWrapper("dynCall_iiddi");
+
+/** @type {function(...*):?} */
+var dynCall_iijji = Module["dynCall_iijji"] = createExportWrapper("dynCall_iijji");
+
+/** @type {function(...*):?} */
+var dynCall_iiiiiiiii = Module["dynCall_iiiiiiiii"] = createExportWrapper("dynCall_iiiiiiiii");
+
+/** @type {function(...*):?} */
+var dynCall_viiiji = Module["dynCall_viiiji"] = createExportWrapper("dynCall_viiiji");
+
+/** @type {function(...*):?} */
+var dynCall_jiiijii = Module["dynCall_jiiijii"] = createExportWrapper("dynCall_jiiijii");
+
+/** @type {function(...*):?} */
+var dynCall_viiijiii = Module["dynCall_viiijiii"] = createExportWrapper("dynCall_viiijiii");
+
+/** @type {function(...*):?} */
+var dynCall_jijii = Module["dynCall_jijii"] = createExportWrapper("dynCall_jijii");
 
 /** @type {function(...*):?} */
 var dynCall_j = Module["dynCall_j"] = createExportWrapper("dynCall_j");
 
 /** @type {function(...*):?} */
 var dynCall_iijii = Module["dynCall_iijii"] = createExportWrapper("dynCall_iijii");
+
+/** @type {function(...*):?} */
+var dynCall_didi = Module["dynCall_didi"] = createExportWrapper("dynCall_didi");
+
+/** @type {function(...*):?} */
+var dynCall_fifi = Module["dynCall_fifi"] = createExportWrapper("dynCall_fifi");
+
+/** @type {function(...*):?} */
+var dynCall_diidi = Module["dynCall_diidi"] = createExportWrapper("dynCall_diidi");
+
+/** @type {function(...*):?} */
+var dynCall_jiiji = Module["dynCall_jiiji"] = createExportWrapper("dynCall_jiiji");
+
+/** @type {function(...*):?} */
+var dynCall_fiifi = Module["dynCall_fiifi"] = createExportWrapper("dynCall_fiifi");
+
+/** @type {function(...*):?} */
+var dynCall_iiffi = Module["dynCall_iiffi"] = createExportWrapper("dynCall_iiffi");
+
+/** @type {function(...*):?} */
+var dynCall_dii = Module["dynCall_dii"] = createExportWrapper("dynCall_dii");
+
+/** @type {function(...*):?} */
+var dynCall_jiii = Module["dynCall_jiii"] = createExportWrapper("dynCall_jiii");
+
+/** @type {function(...*):?} */
+var dynCall_ijji = Module["dynCall_ijji"] = createExportWrapper("dynCall_ijji");
 
 /** @type {function(...*):?} */
 var dynCall_iji = Module["dynCall_iji"] = createExportWrapper("dynCall_iji");
@@ -15231,16 +14171,7 @@ var dynCall_jjji = Module["dynCall_jjji"] = createExportWrapper("dynCall_jjji");
 var dynCall_jiiiii = Module["dynCall_jiiiii"] = createExportWrapper("dynCall_jiiiii");
 
 /** @type {function(...*):?} */
-var dynCall_viifi = Module["dynCall_viifi"] = createExportWrapper("dynCall_viifi");
-
-/** @type {function(...*):?} */
-var dynCall_dii = Module["dynCall_dii"] = createExportWrapper("dynCall_dii");
-
-/** @type {function(...*):?} */
-var dynCall_viiji = Module["dynCall_viiji"] = createExportWrapper("dynCall_viiji");
-
-/** @type {function(...*):?} */
-var dynCall_iiji = Module["dynCall_iiji"] = createExportWrapper("dynCall_iiji");
+var dynCall_viiiiiiiii = Module["dynCall_viiiiiiiii"] = createExportWrapper("dynCall_viiiiiiiii");
 
 /** @type {function(...*):?} */
 var dynCall_vijiii = Module["dynCall_vijiii"] = createExportWrapper("dynCall_vijiii");
@@ -15252,22 +14183,16 @@ var dynCall_vjjjiiii = Module["dynCall_vjjjiiii"] = createExportWrapper("dynCall
 var dynCall_vjiiiii = Module["dynCall_vjiiiii"] = createExportWrapper("dynCall_vjiiiii");
 
 /** @type {function(...*):?} */
-var dynCall_viiiiiiiii = Module["dynCall_viiiiiiiii"] = createExportWrapper("dynCall_viiiiiiiii");
+var dynCall_iiji = Module["dynCall_iiji"] = createExportWrapper("dynCall_iiji");
 
 /** @type {function(...*):?} */
-var dynCall_jijii = Module["dynCall_jijii"] = createExportWrapper("dynCall_jijii");
-
-/** @type {function(...*):?} */
-var dynCall_fifi = Module["dynCall_fifi"] = createExportWrapper("dynCall_fifi");
+var dynCall_ddiii = Module["dynCall_ddiii"] = createExportWrapper("dynCall_ddiii");
 
 /** @type {function(...*):?} */
 var dynCall_iiiji = Module["dynCall_iiiji"] = createExportWrapper("dynCall_iiiji");
 
 /** @type {function(...*):?} */
 var dynCall_viji = Module["dynCall_viji"] = createExportWrapper("dynCall_viji");
-
-/** @type {function(...*):?} */
-var dynCall_iiiiiiiiii = Module["dynCall_iiiiiiiiii"] = createExportWrapper("dynCall_iiiiiiiiii");
 
 /** @type {function(...*):?} */
 var dynCall_viiiiiiiiiiiiii = Module["dynCall_viiiiiiiiiiiiii"] = createExportWrapper("dynCall_viiiiiiiiiiiiii");
@@ -15282,13 +14207,25 @@ var dynCall_iiiiiiiiiii = Module["dynCall_iiiiiiiiiii"] = createExportWrapper("d
 var dynCall_iiiiiiiiiiiii = Module["dynCall_iiiiiiiiiiiii"] = createExportWrapper("dynCall_iiiiiiiiiiiii");
 
 /** @type {function(...*):?} */
-var dynCall_ji = Module["dynCall_ji"] = createExportWrapper("dynCall_ji");
+var dynCall_iiiiiji = Module["dynCall_iiiiiji"] = createExportWrapper("dynCall_iiiiiji");
+
+/** @type {function(...*):?} */
+var dynCall_iiiiji = Module["dynCall_iiiiji"] = createExportWrapper("dynCall_iiiiji");
+
+/** @type {function(...*):?} */
+var dynCall_viiijii = Module["dynCall_viiijii"] = createExportWrapper("dynCall_viiijii");
 
 /** @type {function(...*):?} */
 var dynCall_ijjiii = Module["dynCall_ijjiii"] = createExportWrapper("dynCall_ijjiii");
 
 /** @type {function(...*):?} */
-var dynCall_fii = Module["dynCall_fii"] = createExportWrapper("dynCall_fii");
+var dynCall_ijiiii = Module["dynCall_ijiiii"] = createExportWrapper("dynCall_ijiiii");
+
+/** @type {function(...*):?} */
+var dynCall_ijiii = Module["dynCall_ijiii"] = createExportWrapper("dynCall_ijiii");
+
+/** @type {function(...*):?} */
+var dynCall_diiiii = Module["dynCall_diiiii"] = createExportWrapper("dynCall_diiiii");
 
 /** @type {function(...*):?} */
 var dynCall_vijji = Module["dynCall_vijji"] = createExportWrapper("dynCall_vijji");
@@ -15297,25 +14234,73 @@ var dynCall_vijji = Module["dynCall_vijji"] = createExportWrapper("dynCall_vijji
 var dynCall_viffffi = Module["dynCall_viffffi"] = createExportWrapper("dynCall_viffffi");
 
 /** @type {function(...*):?} */
+var dynCall_vfffi = Module["dynCall_vfffi"] = createExportWrapper("dynCall_vfffi");
+
+/** @type {function(...*):?} */
+var dynCall_vffi = Module["dynCall_vffi"] = createExportWrapper("dynCall_vffi");
+
+/** @type {function(...*):?} */
+var dynCall_vffffi = Module["dynCall_vffffi"] = createExportWrapper("dynCall_vffffi");
+
+/** @type {function(...*):?} */
+var dynCall_viiifi = Module["dynCall_viiifi"] = createExportWrapper("dynCall_viiifi");
+
+/** @type {function(...*):?} */
+var dynCall_viiiiffi = Module["dynCall_viiiiffi"] = createExportWrapper("dynCall_viiiiffi");
+
+/** @type {function(...*):?} */
+var dynCall_viiiffii = Module["dynCall_viiiffii"] = createExportWrapper("dynCall_viiiffii");
+
+/** @type {function(...*):?} */
 var dynCall_vifffi = Module["dynCall_vifffi"] = createExportWrapper("dynCall_vifffi");
-
-/** @type {function(...*):?} */
-var dynCall_ffi = Module["dynCall_ffi"] = createExportWrapper("dynCall_ffi");
-
-/** @type {function(...*):?} */
-var dynCall_fffi = Module["dynCall_fffi"] = createExportWrapper("dynCall_fffi");
-
-/** @type {function(...*):?} */
-var dynCall_vfii = Module["dynCall_vfii"] = createExportWrapper("dynCall_vfii");
 
 /** @type {function(...*):?} */
 var dynCall_viffi = Module["dynCall_viffi"] = createExportWrapper("dynCall_viffi");
 
 /** @type {function(...*):?} */
-var dynCall_vjiiii = Module["dynCall_vjiiii"] = createExportWrapper("dynCall_vjiiii");
+var dynCall_ifi = Module["dynCall_ifi"] = createExportWrapper("dynCall_ifi");
 
 /** @type {function(...*):?} */
-var dynCall_viiffi = Module["dynCall_viiffi"] = createExportWrapper("dynCall_viiffi");
+var dynCall_vfiii = Module["dynCall_vfiii"] = createExportWrapper("dynCall_vfiii");
+
+/** @type {function(...*):?} */
+var dynCall_ffi = Module["dynCall_ffi"] = createExportWrapper("dynCall_ffi");
+
+/** @type {function(...*):?} */
+var dynCall_ffffi = Module["dynCall_ffffi"] = createExportWrapper("dynCall_ffffi");
+
+/** @type {function(...*):?} */
+var dynCall_iffi = Module["dynCall_iffi"] = createExportWrapper("dynCall_iffi");
+
+/** @type {function(...*):?} */
+var dynCall_fffifffi = Module["dynCall_fffifffi"] = createExportWrapper("dynCall_fffifffi");
+
+/** @type {function(...*):?} */
+var dynCall_fdi = Module["dynCall_fdi"] = createExportWrapper("dynCall_fdi");
+
+/** @type {function(...*):?} */
+var dynCall_idi = Module["dynCall_idi"] = createExportWrapper("dynCall_idi");
+
+/** @type {function(...*):?} */
+var dynCall_dddi = Module["dynCall_dddi"] = createExportWrapper("dynCall_dddi");
+
+/** @type {function(...*):?} */
+var dynCall_ddi = Module["dynCall_ddi"] = createExportWrapper("dynCall_ddi");
+
+/** @type {function(...*):?} */
+var dynCall_vfii = Module["dynCall_vfii"] = createExportWrapper("dynCall_vfii");
+
+/** @type {function(...*):?} */
+var dynCall_ddddi = Module["dynCall_ddddi"] = createExportWrapper("dynCall_ddddi");
+
+/** @type {function(...*):?} */
+var dynCall_jji = Module["dynCall_jji"] = createExportWrapper("dynCall_jji");
+
+/** @type {function(...*):?} */
+var dynCall_jjjji = Module["dynCall_jjjji"] = createExportWrapper("dynCall_jjjji");
+
+/** @type {function(...*):?} */
+var dynCall_vjiiii = Module["dynCall_vjiiii"] = createExportWrapper("dynCall_vjiiii");
 
 /** @type {function(...*):?} */
 var dynCall_vijjii = Module["dynCall_vijjii"] = createExportWrapper("dynCall_vijjii");
@@ -15324,40 +14309,262 @@ var dynCall_vijjii = Module["dynCall_vijjii"] = createExportWrapper("dynCall_vij
 var dynCall_viiiiiiiijijiii = Module["dynCall_viiiiiiiijijiii"] = createExportWrapper("dynCall_viiiiiiiijijiii");
 
 /** @type {function(...*):?} */
+var dynCall_viiiiiffii = Module["dynCall_viiiiiffii"] = createExportWrapper("dynCall_viiiiiffii");
+
+/** @type {function(...*):?} */
+var dynCall_viffffii = Module["dynCall_viffffii"] = createExportWrapper("dynCall_viffffii");
+
+/** @type {function(...*):?} */
+var dynCall_iiiifiii = Module["dynCall_iiiifiii"] = createExportWrapper("dynCall_iiiifiii");
+
+/** @type {function(...*):?} */
+var dynCall_iiifiii = Module["dynCall_iiifiii"] = createExportWrapper("dynCall_iiifiii");
+
+/** @type {function(...*):?} */
+var dynCall_viiifiii = Module["dynCall_viiifiii"] = createExportWrapper("dynCall_viiifiii");
+
+/** @type {function(...*):?} */
+var dynCall_viiifii = Module["dynCall_viiifii"] = createExportWrapper("dynCall_viiifii");
+
+/** @type {function(...*):?} */
+var dynCall_viiififi = Module["dynCall_viiififi"] = createExportWrapper("dynCall_viiififi");
+
+/** @type {function(...*):?} */
+var dynCall_viiififfi = Module["dynCall_viiififfi"] = createExportWrapper("dynCall_viiififfi");
+
+/** @type {function(...*):?} */
+var dynCall_iiiiifi = Module["dynCall_iiiiifi"] = createExportWrapper("dynCall_iiiiifi");
+
+/** @type {function(...*):?} */
+var dynCall_iifii = Module["dynCall_iifii"] = createExportWrapper("dynCall_iifii");
+
+/** @type {function(...*):?} */
+var dynCall_vifffffi = Module["dynCall_vifffffi"] = createExportWrapper("dynCall_vifffffi");
+
+/** @type {function(...*):?} */
+var dynCall_viiiiifi = Module["dynCall_viiiiifi"] = createExportWrapper("dynCall_viiiiifi");
+
+/** @type {function(...*):?} */
+var dynCall_viffiiii = Module["dynCall_viffiiii"] = createExportWrapper("dynCall_viffiiii");
+
+/** @type {function(...*):?} */
+var dynCall_viiiffffiiii = Module["dynCall_viiiffffiiii"] = createExportWrapper("dynCall_viiiffffiiii");
+
+/** @type {function(...*):?} */
+var dynCall_viifffffffiiiii = Module["dynCall_viifffffffiiiii"] = createExportWrapper("dynCall_viifffffffiiiii");
+
+/** @type {function(...*):?} */
+var dynCall_fiiii = Module["dynCall_fiiii"] = createExportWrapper("dynCall_fiiii");
+
+/** @type {function(...*):?} */
+var dynCall_fiiiii = Module["dynCall_fiiiii"] = createExportWrapper("dynCall_fiiiii");
+
+/** @type {function(...*):?} */
+var dynCall_iiiiiiffiiiiiiiiiffffiiii = Module["dynCall_iiiiiiffiiiiiiiiiffffiiii"] = createExportWrapper("dynCall_iiiiiiffiiiiiiiiiffffiiii");
+
+/** @type {function(...*):?} */
+var dynCall_iiiiiiffiiiiiiiiiiiiiii = Module["dynCall_iiiiiiffiiiiiiiiiiiiiii"] = createExportWrapper("dynCall_iiiiiiffiiiiiiiiiiiiiii");
+
+/** @type {function(...*):?} */
+var dynCall_viffii = Module["dynCall_viffii"] = createExportWrapper("dynCall_viffii");
+
+/** @type {function(...*):?} */
+var dynCall_vififiii = Module["dynCall_vififiii"] = createExportWrapper("dynCall_vififiii");
+
+/** @type {function(...*):?} */
+var dynCall_viififii = Module["dynCall_viififii"] = createExportWrapper("dynCall_viififii");
+
+/** @type {function(...*):?} */
+var dynCall_fiffi = Module["dynCall_fiffi"] = createExportWrapper("dynCall_fiffi");
+
+/** @type {function(...*):?} */
+var dynCall_viijji = Module["dynCall_viijji"] = createExportWrapper("dynCall_viijji");
+
+/** @type {function(...*):?} */
+var dynCall_diii = Module["dynCall_diii"] = createExportWrapper("dynCall_diii");
+
+/** @type {function(...*):?} */
+var dynCall_viiidi = Module["dynCall_viiidi"] = createExportWrapper("dynCall_viiidi");
+
+/** @type {function(...*):?} */
+var dynCall_jijji = Module["dynCall_jijji"] = createExportWrapper("dynCall_jijji");
+
+/** @type {function(...*):?} */
+var dynCall_viiffffi = Module["dynCall_viiffffi"] = createExportWrapper("dynCall_viiffffi");
+
+/** @type {function(...*):?} */
+var dynCall_fifffi = Module["dynCall_fifffi"] = createExportWrapper("dynCall_fifffi");
+
+/** @type {function(...*):?} */
+var dynCall_ifffi = Module["dynCall_ifffi"] = createExportWrapper("dynCall_ifffi");
+
+/** @type {function(...*):?} */
+var dynCall_viffiii = Module["dynCall_viffiii"] = createExportWrapper("dynCall_viffiii");
+
+/** @type {function(...*):?} */
+var dynCall_viffifi = Module["dynCall_viffifi"] = createExportWrapper("dynCall_viffifi");
+
+/** @type {function(...*):?} */
+var dynCall_fiffffi = Module["dynCall_fiffffi"] = createExportWrapper("dynCall_fiffffi");
+
+/** @type {function(...*):?} */
+var dynCall_fffffffi = Module["dynCall_fffffffi"] = createExportWrapper("dynCall_fffffffi");
+
+/** @type {function(...*):?} */
+var dynCall_viiffifi = Module["dynCall_viiffifi"] = createExportWrapper("dynCall_viiffifi");
+
+/** @type {function(...*):?} */
+var dynCall_viiiffiiiiiiiii = Module["dynCall_viiiffiiiiiiiii"] = createExportWrapper("dynCall_viiiffiiiiiiiii");
+
+/** @type {function(...*):?} */
+var dynCall_viiiffiiiiii = Module["dynCall_viiiffiiiiii"] = createExportWrapper("dynCall_viiiffiiiiii");
+
+/** @type {function(...*):?} */
+var dynCall_viiffiiiiiiiiii = Module["dynCall_viiffiiiiiiiiii"] = createExportWrapper("dynCall_viiffiiiiiiiiii");
+
+/** @type {function(...*):?} */
+var dynCall_viiffiiiiiii = Module["dynCall_viiffiiiiiii"] = createExportWrapper("dynCall_viiffiiiiiii");
+
+/** @type {function(...*):?} */
+var dynCall_viffffffi = Module["dynCall_viffffffi"] = createExportWrapper("dynCall_viffffffi");
+
+/** @type {function(...*):?} */
+var dynCall_iiiffiiii = Module["dynCall_iiiffiiii"] = createExportWrapper("dynCall_iiiffiiii");
+
+/** @type {function(...*):?} */
+var dynCall_fffffi = Module["dynCall_fffffi"] = createExportWrapper("dynCall_fffffi");
+
+/** @type {function(...*):?} */
+var dynCall_iiiiffiiii = Module["dynCall_iiiiffiiii"] = createExportWrapper("dynCall_iiiiffiiii");
+
+/** @type {function(...*):?} */
+var dynCall_fiiiffi = Module["dynCall_fiiiffi"] = createExportWrapper("dynCall_fiiiffi");
+
+/** @type {function(...*):?} */
+var dynCall_diiii = Module["dynCall_diiii"] = createExportWrapper("dynCall_diiii");
+
+/** @type {function(...*):?} */
+var dynCall_jiiii = Module["dynCall_jiiii"] = createExportWrapper("dynCall_jiiii");
+
+/** @type {function(...*):?} */
+var dynCall_ijii = Module["dynCall_ijii"] = createExportWrapper("dynCall_ijii");
+
+/** @type {function(...*):?} */
+var dynCall_vjii = Module["dynCall_vjii"] = createExportWrapper("dynCall_vjii");
+
+/** @type {function(...*):?} */
+var dynCall_viiiiiiiijiiii = Module["dynCall_viiiiiiiijiiii"] = createExportWrapper("dynCall_viiiiiiiijiiii");
+
+/** @type {function(...*):?} */
+var dynCall_viiiiiifiiiiii = Module["dynCall_viiiiiifiiiiii"] = createExportWrapper("dynCall_viiiiiifiiiiii");
+
+/** @type {function(...*):?} */
+var dynCall_viffffiii = Module["dynCall_viffffiii"] = createExportWrapper("dynCall_viffffiii");
+
+/** @type {function(...*):?} */
+var dynCall_viifiii = Module["dynCall_viifiii"] = createExportWrapper("dynCall_viifiii");
+
+/** @type {function(...*):?} */
+var dynCall_viiiiiiiiiiii = Module["dynCall_viiiiiiiiiiii"] = createExportWrapper("dynCall_viiiiiiiiiiii");
+
+/** @type {function(...*):?} */
+var dynCall_vifiiiiii = Module["dynCall_vifiiiiii"] = createExportWrapper("dynCall_vifiiiiii");
+
+/** @type {function(...*):?} */
+var dynCall_ffii = Module["dynCall_ffii"] = createExportWrapper("dynCall_ffii");
+
+/** @type {function(...*):?} */
+var dynCall_viifiiii = Module["dynCall_viifiiii"] = createExportWrapper("dynCall_viifiiii");
+
+/** @type {function(...*):?} */
+var dynCall_fifii = Module["dynCall_fifii"] = createExportWrapper("dynCall_fifii");
+
+/** @type {function(...*):?} */
+var dynCall_vifffii = Module["dynCall_vifffii"] = createExportWrapper("dynCall_vifffii");
+
+/** @type {function(...*):?} */
+var dynCall_viiiffi = Module["dynCall_viiiffi"] = createExportWrapper("dynCall_viiiffi");
+
+/** @type {function(...*):?} */
+var dynCall_viiifffi = Module["dynCall_viiifffi"] = createExportWrapper("dynCall_viiifffi");
+
+/** @type {function(...*):?} */
+var dynCall_fiifii = Module["dynCall_fiifii"] = createExportWrapper("dynCall_fiifii");
+
+/** @type {function(...*):?} */
+var dynCall_viiiiiffi = Module["dynCall_viiiiiffi"] = createExportWrapper("dynCall_viiiiiffi");
+
+/** @type {function(...*):?} */
+var dynCall_iifffi = Module["dynCall_iifffi"] = createExportWrapper("dynCall_iifffi");
+
+/** @type {function(...*):?} */
+var dynCall_viiidii = Module["dynCall_viiidii"] = createExportWrapper("dynCall_viiidii");
+
+/** @type {function(...*):?} */
+var dynCall_ijiiiiiiiii = Module["dynCall_ijiiiiiiiii"] = createExportWrapper("dynCall_ijiiiiiiiii");
+
+/** @type {function(...*):?} */
+var dynCall_jjjii = Module["dynCall_jjjii"] = createExportWrapper("dynCall_jjjii");
+
+/** @type {function(...*):?} */
+var dynCall_iijjijii = Module["dynCall_iijjijii"] = createExportWrapper("dynCall_iijjijii");
+
+/** @type {function(...*):?} */
+var dynCall_viiiijii = Module["dynCall_viiiijii"] = createExportWrapper("dynCall_viiiijii");
+
+/** @type {function(...*):?} */
+var dynCall_jiijii = Module["dynCall_jiijii"] = createExportWrapper("dynCall_jiijii");
+
+/** @type {function(...*):?} */
+var dynCall_viijiii = Module["dynCall_viijiii"] = createExportWrapper("dynCall_viijiii");
+
+/** @type {function(...*):?} */
+var dynCall_jjii = Module["dynCall_jjii"] = createExportWrapper("dynCall_jjii");
+
+/** @type {function(...*):?} */
+var dynCall_viffffffffffffffffi = Module["dynCall_viffffffffffffffffi"] = createExportWrapper("dynCall_viffffffffffffffffi");
+
+/** @type {function(...*):?} */
+var dynCall_viifffi = Module["dynCall_viifffi"] = createExportWrapper("dynCall_viifffi");
+
+/** @type {function(...*):?} */
+var dynCall_viifffffi = Module["dynCall_viifffffi"] = createExportWrapper("dynCall_viifffffi");
+
+/** @type {function(...*):?} */
+var dynCall_viiffffffi = Module["dynCall_viiffffffi"] = createExportWrapper("dynCall_viiffffffi");
+
+/** @type {function(...*):?} */
+var dynCall_viifffffffi = Module["dynCall_viifffffffi"] = createExportWrapper("dynCall_viifffffffi");
+
+/** @type {function(...*):?} */
+var dynCall_viiffffffffi = Module["dynCall_viiffffffffi"] = createExportWrapper("dynCall_viiffffffffi");
+
+/** @type {function(...*):?} */
+var dynCall_vifiiii = Module["dynCall_vifiiii"] = createExportWrapper("dynCall_vifiiii");
+
+/** @type {function(...*):?} */
+var dynCall_vidiii = Module["dynCall_vidiii"] = createExportWrapper("dynCall_vidiii");
+
+/** @type {function(...*):?} */
+var dynCall_viiffffffffiii = Module["dynCall_viiffffffffiii"] = createExportWrapper("dynCall_viiffffffffiii");
+
+/** @type {function(...*):?} */
+var dynCall_viiiiffffii = Module["dynCall_viiiiffffii"] = createExportWrapper("dynCall_viiiiffffii");
+
+/** @type {function(...*):?} */
+var dynCall_fiiiiii = Module["dynCall_fiiiiii"] = createExportWrapper("dynCall_fiiiiii");
+
+/** @type {function(...*):?} */
 var dynCall_idiiii = Module["dynCall_idiiii"] = createExportWrapper("dynCall_idiiii");
 
 /** @type {function(...*):?} */
 var dynCall_iiiiiiiiiiiiii = Module["dynCall_iiiiiiiiiiiiii"] = createExportWrapper("dynCall_iiiiiiiiiiiiii");
 
 /** @type {function(...*):?} */
-var dynCall_iiiiiiiiiiii = Module["dynCall_iiiiiiiiiiii"] = createExportWrapper("dynCall_iiiiiiiiiiii");
-
-/** @type {function(...*):?} */
-var dynCall_ifi = Module["dynCall_ifi"] = createExportWrapper("dynCall_ifi");
-
-/** @type {function(...*):?} */
-var dynCall_idi = Module["dynCall_idi"] = createExportWrapper("dynCall_idi");
-
-/** @type {function(...*):?} */
-var dynCall_fiii = Module["dynCall_fiii"] = createExportWrapper("dynCall_fiii");
-
-/** @type {function(...*):?} */
-var dynCall_diii = Module["dynCall_diii"] = createExportWrapper("dynCall_diii");
-
-/** @type {function(...*):?} */
-var dynCall_jjii = Module["dynCall_jjii"] = createExportWrapper("dynCall_jjii");
-
-/** @type {function(...*):?} */
 var dynCall_vijiiiiiii = Module["dynCall_vijiiiiiii"] = createExportWrapper("dynCall_vijiiiiiii");
 
 /** @type {function(...*):?} */
 var dynCall_vijiiiiiiii = Module["dynCall_vijiiiiiiii"] = createExportWrapper("dynCall_vijiiiiiiii");
-
-/** @type {function(...*):?} */
-var dynCall_jiiii = Module["dynCall_jiiii"] = createExportWrapper("dynCall_jiiii");
-
-/** @type {function(...*):?} */
-var dynCall_jji = Module["dynCall_jji"] = createExportWrapper("dynCall_jji");
 
 /** @type {function(...*):?} */
 var dynCall_jijiii = Module["dynCall_jijiii"] = createExportWrapper("dynCall_jijiii");
@@ -15370,9 +14577,6 @@ var dynCall_jjiiiii = Module["dynCall_jjiiiii"] = createExportWrapper("dynCall_j
 
 /** @type {function(...*):?} */
 var dynCall_viijiiiiii = Module["dynCall_viijiiiiii"] = createExportWrapper("dynCall_viijiiiiii");
-
-/** @type {function(...*):?} */
-var dynCall_iijiii = Module["dynCall_iijiii"] = createExportWrapper("dynCall_iijiii");
 
 /** @type {function(...*):?} */
 var dynCall_iijiiiiii = Module["dynCall_iijiiiiii"] = createExportWrapper("dynCall_iijiiiiii");
@@ -15390,22 +14594,10 @@ var dynCall_jijjjii = Module["dynCall_jijjjii"] = createExportWrapper("dynCall_j
 var dynCall_jjiii = Module["dynCall_jjiii"] = createExportWrapper("dynCall_jjiii");
 
 /** @type {function(...*):?} */
-var dynCall_ijiiii = Module["dynCall_ijiiii"] = createExportWrapper("dynCall_ijiiii");
-
-/** @type {function(...*):?} */
 var dynCall_ijijiiiii = Module["dynCall_ijijiiiii"] = createExportWrapper("dynCall_ijijiiiii");
 
 /** @type {function(...*):?} */
 var dynCall_ijjjiii = Module["dynCall_ijjjiii"] = createExportWrapper("dynCall_ijjjiii");
-
-/** @type {function(...*):?} */
-var dynCall_ijiii = Module["dynCall_ijiii"] = createExportWrapper("dynCall_ijiii");
-
-/** @type {function(...*):?} */
-var dynCall_ijii = Module["dynCall_ijii"] = createExportWrapper("dynCall_ijii");
-
-/** @type {function(...*):?} */
-var dynCall_vjii = Module["dynCall_vjii"] = createExportWrapper("dynCall_vjii");
 
 /** @type {function(...*):?} */
 var dynCall_vijjjiijii = Module["dynCall_vijjjiijii"] = createExportWrapper("dynCall_vijjjiijii");
@@ -15429,31 +14621,16 @@ var dynCall_jfi = Module["dynCall_jfi"] = createExportWrapper("dynCall_jfi");
 var dynCall_fji = Module["dynCall_fji"] = createExportWrapper("dynCall_fji");
 
 /** @type {function(...*):?} */
-var dynCall_fdi = Module["dynCall_fdi"] = createExportWrapper("dynCall_fdi");
-
-/** @type {function(...*):?} */
 var dynCall_dji = Module["dynCall_dji"] = createExportWrapper("dynCall_dji");
 
 /** @type {function(...*):?} */
 var dynCall_dfi = Module["dynCall_dfi"] = createExportWrapper("dynCall_dfi");
 
 /** @type {function(...*):?} */
-var dynCall_vidi = Module["dynCall_vidi"] = createExportWrapper("dynCall_vidi");
-
-/** @type {function(...*):?} */
-var dynCall_vijii = Module["dynCall_vijii"] = createExportWrapper("dynCall_vijii");
-
-/** @type {function(...*):?} */
 var dynCall_jidii = Module["dynCall_jidii"] = createExportWrapper("dynCall_jidii");
 
 /** @type {function(...*):?} */
 var dynCall_jidi = Module["dynCall_jidi"] = createExportWrapper("dynCall_jidi");
-
-/** @type {function(...*):?} */
-var dynCall_iidi = Module["dynCall_iidi"] = createExportWrapper("dynCall_iidi");
-
-/** @type {function(...*):?} */
-var dynCall_diiii = Module["dynCall_diiii"] = createExportWrapper("dynCall_diiii");
 
 /** @type {function(...*):?} */
 var dynCall_ijiijii = Module["dynCall_ijiijii"] = createExportWrapper("dynCall_ijiijii");
@@ -15477,10 +14654,7 @@ var dynCall_ijiiiiji = Module["dynCall_ijiiiiji"] = createExportWrapper("dynCall
 var dynCall_viiiiiiiiiiiii = Module["dynCall_viiiiiiiiiiiii"] = createExportWrapper("dynCall_viiiiiiiiiiiii");
 
 /** @type {function(...*):?} */
-var dynCall_ddi = Module["dynCall_ddi"] = createExportWrapper("dynCall_ddi");
-
-/** @type {function(...*):?} */
-var dynCall_dddi = Module["dynCall_dddi"] = createExportWrapper("dynCall_dddi");
+var dynCall_ddii = Module["dynCall_ddii"] = createExportWrapper("dynCall_ddii");
 
 /** @type {function(...*):?} */
 var dynCall_idiii = Module["dynCall_idiii"] = createExportWrapper("dynCall_idiii");
@@ -15501,61 +14675,22 @@ var dynCall_ifiiiii = Module["dynCall_ifiiiii"] = createExportWrapper("dynCall_i
 var dynCall_iifiii = Module["dynCall_iifiii"] = createExportWrapper("dynCall_iifiii");
 
 /** @type {function(...*):?} */
-var dynCall_fiiii = Module["dynCall_fiiii"] = createExportWrapper("dynCall_fiiii");
-
-/** @type {function(...*):?} */
-var dynCall_jjjii = Module["dynCall_jjjii"] = createExportWrapper("dynCall_jjjii");
-
-/** @type {function(...*):?} */
 var dynCall_vdiii = Module["dynCall_vdiii"] = createExportWrapper("dynCall_vdiii");
-
-/** @type {function(...*):?} */
-var dynCall_iifi = Module["dynCall_iifi"] = createExportWrapper("dynCall_iifi");
 
 /** @type {function(...*):?} */
 var dynCall_jdii = Module["dynCall_jdii"] = createExportWrapper("dynCall_jdii");
 
 /** @type {function(...*):?} */
-var dynCall_vijijji = Module["dynCall_vijijji"] = createExportWrapper("dynCall_vijijji");
-
-/** @type {function(...*):?} */
-var dynCall_iijjji = Module["dynCall_iijjji"] = createExportWrapper("dynCall_iijjji");
-
-/** @type {function(...*):?} */
-var dynCall_viijji = Module["dynCall_viijji"] = createExportWrapper("dynCall_viijji");
-
-/** @type {function(...*):?} */
-var dynCall_viijjji = Module["dynCall_viijjji"] = createExportWrapper("dynCall_viijjji");
-
-/** @type {function(...*):?} */
-var dynCall_viiiji = Module["dynCall_viiiji"] = createExportWrapper("dynCall_viiiji");
-
-/** @type {function(...*):?} */
 var dynCall_vdii = Module["dynCall_vdii"] = createExportWrapper("dynCall_vdii");
 
 /** @type {function(...*):?} */
-var dynCall_fiffi = Module["dynCall_fiffi"] = createExportWrapper("dynCall_fiffi");
-
-/** @type {function(...*):?} */
-var dynCall_jijji = Module["dynCall_jijji"] = createExportWrapper("dynCall_jijji");
-
-/** @type {function(...*):?} */
 var dynCall_diddi = Module["dynCall_diddi"] = createExportWrapper("dynCall_diddi");
-
-/** @type {function(...*):?} */
-var dynCall_didi = Module["dynCall_didi"] = createExportWrapper("dynCall_didi");
-
-/** @type {function(...*):?} */
-var dynCall_viiiijii = Module["dynCall_viiiijii"] = createExportWrapper("dynCall_viiiijii");
 
 /** @type {function(...*):?} */
 var dynCall_viiijji = Module["dynCall_viiijji"] = createExportWrapper("dynCall_viiijji");
 
 /** @type {function(...*):?} */
 var dynCall_iijjii = Module["dynCall_iijjii"] = createExportWrapper("dynCall_iijjii");
-
-/** @type {function(...*):?} */
-var dynCall_vji = Module["dynCall_vji"] = createExportWrapper("dynCall_vji");
 
 /** @type {function(...*):?} */
 var dynCall_viijijii = Module["dynCall_viijijii"] = createExportWrapper("dynCall_viijijii");
@@ -15576,13 +14711,7 @@ var dynCall_viiiijiiii = Module["dynCall_viiiijiiii"] = createExportWrapper("dyn
 var dynCall_jiiiiii = Module["dynCall_jiiiiii"] = createExportWrapper("dynCall_jiiiiii");
 
 /** @type {function(...*):?} */
-var dynCall_fi = Module["dynCall_fi"] = createExportWrapper("dynCall_fi");
-
-/** @type {function(...*):?} */
 var dynCall_di = Module["dynCall_di"] = createExportWrapper("dynCall_di");
-
-/** @type {function(...*):?} */
-var dynCall_viijjii = Module["dynCall_viijjii"] = createExportWrapper("dynCall_viijjii");
 
 /** @type {function(...*):?} */
 var dynCall_vijjji = Module["dynCall_vijjji"] = createExportWrapper("dynCall_vijjji");
@@ -15591,19 +14720,43 @@ var dynCall_vijjji = Module["dynCall_vijjji"] = createExportWrapper("dynCall_vij
 var dynCall_jiiiiiiiiii = Module["dynCall_jiiiiiiiiii"] = createExportWrapper("dynCall_jiiiiiiiiii");
 
 /** @type {function(...*):?} */
-var dynCall_viiiiiiiiiiii = Module["dynCall_viiiiiiiiiiii"] = createExportWrapper("dynCall_viiiiiiiiiiii");
-
-/** @type {function(...*):?} */
-var dynCall_viifii = Module["dynCall_viifii"] = createExportWrapper("dynCall_viifii");
+var dynCall_iiiiidii = Module["dynCall_iiiiidii"] = createExportWrapper("dynCall_iiiiidii");
 
 /** @type {function(...*):?} */
 var dynCall_iiiiijii = Module["dynCall_iiiiijii"] = createExportWrapper("dynCall_iiiiijii");
 
 /** @type {function(...*):?} */
-var dynCall_viiifi = Module["dynCall_viiifi"] = createExportWrapper("dynCall_viiifi");
+var dynCall_iddi = Module["dynCall_iddi"] = createExportWrapper("dynCall_iddi");
 
 /** @type {function(...*):?} */
-var dynCall_viidi = Module["dynCall_viidi"] = createExportWrapper("dynCall_viidi");
+var dynCall_iiidiii = Module["dynCall_iiidiii"] = createExportWrapper("dynCall_iiidiii");
+
+/** @type {function(...*):?} */
+var dynCall_iidii = Module["dynCall_iidii"] = createExportWrapper("dynCall_iidii");
+
+/** @type {function(...*):?} */
+var dynCall_viifffiii = Module["dynCall_viifffiii"] = createExportWrapper("dynCall_viifffiii");
+
+/** @type {function(...*):?} */
+var dynCall_iiiiffiiiji = Module["dynCall_iiiiffiiiji"] = createExportWrapper("dynCall_iiiiffiiiji");
+
+/** @type {function(...*):?} */
+var dynCall_iiiiffiiiii = Module["dynCall_iiiiffiiiii"] = createExportWrapper("dynCall_iiiiffiiiii");
+
+/** @type {function(...*):?} */
+var dynCall_diiiidi = Module["dynCall_diiiidi"] = createExportWrapper("dynCall_diiiidi");
+
+/** @type {function(...*):?} */
+var dynCall_jiiiiji = Module["dynCall_jiiiiji"] = createExportWrapper("dynCall_jiiiiji");
+
+/** @type {function(...*):?} */
+var dynCall_fiiiifi = Module["dynCall_fiiiifi"] = createExportWrapper("dynCall_fiiiifi");
+
+/** @type {function(...*):?} */
+var dynCall_iiidi = Module["dynCall_iiidi"] = createExportWrapper("dynCall_iiidi");
+
+/** @type {function(...*):?} */
+var dynCall_vdi = Module["dynCall_vdi"] = createExportWrapper("dynCall_vdi");
 
 /** @type {function(...*):?} */
 var dynCall_vfi = Module["dynCall_vfi"] = createExportWrapper("dynCall_vfi");
@@ -15630,7 +14783,16 @@ var dynCall_vjji = Module["dynCall_vjji"] = createExportWrapper("dynCall_vjji");
 var dynCall_viffff = Module["dynCall_viffff"] = createExportWrapper("dynCall_viffff");
 
 /** @type {function(...*):?} */
-var dynCall_iiijii = Module["dynCall_iiijii"] = createExportWrapper("dynCall_iiijii");
+var dynCall_vid = Module["dynCall_vid"] = createExportWrapper("dynCall_vid");
+
+/** @type {function(...*):?} */
+var dynCall_viiiiif = Module["dynCall_viiiiif"] = createExportWrapper("dynCall_viiiiif");
+
+/** @type {function(...*):?} */
+var dynCall_viiiif = Module["dynCall_viiiif"] = createExportWrapper("dynCall_viiiif");
+
+/** @type {function(...*):?} */
+var dynCall_viiiiiif = Module["dynCall_viiiiiif"] = createExportWrapper("dynCall_viiiiiif");
 
 /** @type {function(...*):?} */
 var dynCall_iiiijiii = Module["dynCall_iiiijiii"] = createExportWrapper("dynCall_iiiijiii");
@@ -15639,16 +14801,10 @@ var dynCall_iiiijiii = Module["dynCall_iiiijiii"] = createExportWrapper("dynCall
 var dynCall_iiiij = Module["dynCall_iiiij"] = createExportWrapper("dynCall_iiiij");
 
 /** @type {function(...*):?} */
-var dynCall_jiiji = Module["dynCall_jiiji"] = createExportWrapper("dynCall_jiiji");
+var dynCall_iiiiiifffiiifiii = Module["dynCall_iiiiiifffiiifiii"] = createExportWrapper("dynCall_iiiiiifffiiifiii");
 
 /** @type {function(...*):?} */
-var dynCall_iiif = Module["dynCall_iiif"] = createExportWrapper("dynCall_iiif");
-
-/** @type {function(...*):?} */
-var dynCall_fif = Module["dynCall_fif"] = createExportWrapper("dynCall_fif");
-
-/** @type {function(...*):?} */
-var dynCall_vid = Module["dynCall_vid"] = createExportWrapper("dynCall_vid");
+var dynCall_fiiiif = Module["dynCall_fiiiif"] = createExportWrapper("dynCall_fiiiif");
 
 /** @type {function(...*):?} */
 var dynCall_vjiiiiiii = Module["dynCall_vjiiiiiii"] = createExportWrapper("dynCall_vjiiiiiii");
@@ -15663,22 +14819,10 @@ var dynCall_vffff = Module["dynCall_vffff"] = createExportWrapper("dynCall_vffff
 var dynCall_vff = Module["dynCall_vff"] = createExportWrapper("dynCall_vff");
 
 /** @type {function(...*):?} */
-var dynCall_viiiiifi = Module["dynCall_viiiiifi"] = createExportWrapper("dynCall_viiiiifi");
-
-/** @type {function(...*):?} */
 var dynCall_viiiiiji = Module["dynCall_viiiiiji"] = createExportWrapper("dynCall_viiiiiji");
 
 /** @type {function(...*):?} */
-var dynCall_viiiiiif = Module["dynCall_viiiiiif"] = createExportWrapper("dynCall_viiiiiif");
-
-/** @type {function(...*):?} */
-var dynCall_viiiiif = Module["dynCall_viiiiif"] = createExportWrapper("dynCall_viiiiif");
-
-/** @type {function(...*):?} */
 var dynCall_viiff = Module["dynCall_viiff"] = createExportWrapper("dynCall_viiff");
-
-/** @type {function(...*):?} */
-var dynCall_viffii = Module["dynCall_viffii"] = createExportWrapper("dynCall_viffii");
 
 /** @type {function(...*):?} */
 var dynCall_viiiiiiiiiiiiiiiiii = Module["dynCall_viiiiiiiiiiiiiiiiii"] = createExportWrapper("dynCall_viiiiiiiiiiiiiiiiii");
@@ -15708,52 +14852,32 @@ var dynCall_vfff = Module["dynCall_vfff"] = createExportWrapper("dynCall_vfff");
 var dynCall_viij = Module["dynCall_viij"] = createExportWrapper("dynCall_viij");
 
 /** @type {function(...*):?} */
+var dynCall_f = Module["dynCall_f"] = createExportWrapper("dynCall_f");
+
+/** @type {function(...*):?} */
+var dynCall_viiif = Module["dynCall_viiif"] = createExportWrapper("dynCall_viiif");
+
+/** @type {function(...*):?} */
 var dynCall_ff = Module["dynCall_ff"] = createExportWrapper("dynCall_ff");
 
+/** @type {function(...*):?} */
+var dynCall_iiiiiiffiiiiiiiiiffffiii = Module["dynCall_iiiiiiffiiiiiiiiiffffiii"] = createExportWrapper("dynCall_iiiiiiffiiiiiiiiiffffiii");
 
-function invoke_ii(index,a1) {
-  var sp = stackSave();
-  try {
-    return dynCall_ii(index,a1);
-  } catch(e) {
-    stackRestore(sp);
-    if (e !== e+0) throw e;
-    _setThrew(1, 0);
-  }
-}
+/** @type {function(...*):?} */
+var dynCall_viififi = Module["dynCall_viififi"] = createExportWrapper("dynCall_viififi");
 
-function invoke_vii(index,a1,a2) {
-  var sp = stackSave();
-  try {
-    dynCall_vii(index,a1,a2);
-  } catch(e) {
-    stackRestore(sp);
-    if (e !== e+0) throw e;
-    _setThrew(1, 0);
-  }
-}
+/** @type {function(...*):?} */
+var dynCall_if = Module["dynCall_if"] = createExportWrapper("dynCall_if");
 
-function invoke_v(index) {
-  var sp = stackSave();
-  try {
-    dynCall_v(index);
-  } catch(e) {
-    stackRestore(sp);
-    if (e !== e+0) throw e;
-    _setThrew(1, 0);
-  }
-}
+/** @type {function(...*):?} */
+var dynCall_viiffiiiiiiiii = Module["dynCall_viiffiiiiiiiii"] = createExportWrapper("dynCall_viiffiiiiiiiii");
 
-function invoke_iii(index,a1,a2) {
-  var sp = stackSave();
-  try {
-    return dynCall_iii(index,a1,a2);
-  } catch(e) {
-    stackRestore(sp);
-    if (e !== e+0) throw e;
-    _setThrew(1, 0);
-  }
-}
+/** @type {function(...*):?} */
+var dynCall_viiffiiiiii = Module["dynCall_viiffiiiiii"] = createExportWrapper("dynCall_viiffiiiiii");
+
+/** @type {function(...*):?} */
+var dynCall_viiiiiiiijiii = Module["dynCall_viiiiiiiijiii"] = createExportWrapper("dynCall_viiiiiiiijiii");
+
 
 function invoke_vi(index,a1) {
   var sp = stackSave();
@@ -15770,6 +14894,17 @@ function invoke_iiiii(index,a1,a2,a3,a4) {
   var sp = stackSave();
   try {
     return dynCall_iiiii(index,a1,a2,a3,a4);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_vii(index,a1,a2) {
+  var sp = stackSave();
+  try {
+    dynCall_vii(index,a1,a2);
   } catch(e) {
     stackRestore(sp);
     if (e !== e+0) throw e;
@@ -15799,10 +14934,43 @@ function invoke_iiiiii(index,a1,a2,a3,a4,a5) {
   }
 }
 
+function invoke_ii(index,a1) {
+  var sp = stackSave();
+  try {
+    return dynCall_ii(index,a1);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
 function invoke_viii(index,a1,a2,a3) {
   var sp = stackSave();
   try {
     dynCall_viii(index,a1,a2,a3);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iii(index,a1,a2) {
+  var sp = stackSave();
+  try {
+    return dynCall_iii(index,a1,a2);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_v(index) {
+  var sp = stackSave();
+  try {
+    dynCall_v(index);
   } catch(e) {
     stackRestore(sp);
     if (e !== e+0) throw e;
@@ -15898,28 +15066,6 @@ function invoke_iiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8) {
   }
 }
 
-function invoke_viiiiiii(index,a1,a2,a3,a4,a5,a6,a7) {
-  var sp = stackSave();
-  try {
-    dynCall_viiiiiii(index,a1,a2,a3,a4,a5,a6,a7);
-  } catch(e) {
-    stackRestore(sp);
-    if (e !== e+0) throw e;
-    _setThrew(1, 0);
-  }
-}
-
-function invoke_viiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
-  var sp = stackSave();
-  try {
-    dynCall_viiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
-  } catch(e) {
-    stackRestore(sp);
-    if (e !== e+0) throw e;
-    _setThrew(1, 0);
-  }
-}
-
 function invoke_viifi(index,a1,a2,a3,a4) {
   var sp = stackSave();
   try {
@@ -15931,10 +15077,43 @@ function invoke_viifi(index,a1,a2,a3,a4) {
   }
 }
 
-function invoke_iiiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
+function invoke_iiifii(index,a1,a2,a3,a4,a5) {
   var sp = stackSave();
   try {
-    return dynCall_iiiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
+    return dynCall_iiifii(index,a1,a2,a3,a4,a5);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viffi(index,a1,a2,a3,a4) {
+  var sp = stackSave();
+  try {
+    dynCall_viffi(index,a1,a2,a3,a4);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiidii(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    return dynCall_iiiidii(index,a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_vidi(index,a1,a2,a3) {
+  var sp = stackSave();
+  try {
+    dynCall_vidi(index,a1,a2,a3);
   } catch(e) {
     stackRestore(sp);
     if (e !== e+0) throw e;
@@ -15953,6 +15132,17 @@ function invoke_dii(index,a1,a2) {
   }
 }
 
+function invoke_viidi(index,a1,a2,a3,a4) {
+  var sp = stackSave();
+  try {
+    dynCall_viidi(index,a1,a2,a3,a4);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
 function invoke_iiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9) {
   var sp = stackSave();
   try {
@@ -15964,10 +15154,197 @@ function invoke_iiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9) {
   }
 }
 
+function invoke_vifi(index,a1,a2,a3) {
+  var sp = stackSave();
+  try {
+    dynCall_vifi(index,a1,a2,a3);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_diii(index,a1,a2,a3) {
+  var sp = stackSave();
+  try {
+    return dynCall_diii(index,a1,a2,a3);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_fiii(index,a1,a2,a3) {
+  var sp = stackSave();
+  try {
+    return dynCall_fiii(index,a1,a2,a3);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_fii(index,a1,a2) {
+  var sp = stackSave();
+  try {
+    return dynCall_fii(index,a1,a2);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11) {
+  var sp = stackSave();
+  try {
+    return dynCall_iiiiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iifi(index,a1,a2,a3) {
+  var sp = stackSave();
+  try {
+    return dynCall_iifi(index,a1,a2,a3);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
+  var sp = stackSave();
+  try {
+    dynCall_viiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_fffi(index,a1,a2,a3) {
+  var sp = stackSave();
+  try {
+    return dynCall_fffi(index,a1,a2,a3);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viifii(index,a1,a2,a3,a4,a5) {
+  var sp = stackSave();
+  try {
+    dynCall_viifii(index,a1,a2,a3,a4,a5);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_vifii(index,a1,a2,a3,a4) {
+  var sp = stackSave();
+  try {
+    dynCall_vifii(index,a1,a2,a3,a4);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiffi(index,a1,a2,a3,a4,a5) {
+  var sp = stackSave();
+  try {
+    dynCall_viiffi(index,a1,a2,a3,a4,a5);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_fi(index,a1) {
+  var sp = stackSave();
+  try {
+    return dynCall_fi(index,a1);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiifi(index,a1,a2,a3,a4) {
+  var sp = stackSave();
+  try {
+    return dynCall_iiifi(index,a1,a2,a3,a4);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiifi(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    dynCall_viiiifi(index,a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
+  var sp = stackSave();
+  try {
+    return dynCall_iiiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiii(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    dynCall_viiiiiii(index,a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
 function invoke_viiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9) {
   var sp = stackSave();
   try {
     dynCall_viiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_ddiii(index,a1,a2,a3,a4) {
+  var sp = stackSave();
+  try {
+    return dynCall_ddiii(index,a1,a2,a3,a4);
   } catch(e) {
     stackRestore(sp);
     if (e !== e+0) throw e;
@@ -16041,10 +15418,153 @@ function invoke_jjji(index,a1,a2,a3,a4,a5) {
   }
 }
 
+function invoke_jijii(index,a1,a2,a3,a4,a5) {
+  var sp = stackSave();
+  try {
+    return dynCall_jijii(index,a1,a2,a3,a4,a5);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiji(index,a1,a2,a3,a4,a5) {
+  var sp = stackSave();
+  try {
+    dynCall_viiji(index,a1,a2,a3,a4,a5);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiijii(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    return dynCall_iiijii(index,a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
 function invoke_iiiijii(index,a1,a2,a3,a4,a5,a6,a7) {
   var sp = stackSave();
   try {
     return dynCall_iiiijii(index,a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_vijii(index,a1,a2,a3,a4,a5) {
+  var sp = stackSave();
+  try {
+    dynCall_vijii(index,a1,a2,a3,a4,a5);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iijiii(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    return dynCall_iijiii(index,a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viji(index,a1,a2,a3,a4) {
+  var sp = stackSave();
+  try {
+    dynCall_viji(index,a1,a2,a3,a4);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_jiii(index,a1,a2,a3) {
+  var sp = stackSave();
+  try {
+    return dynCall_jiii(index,a1,a2,a3);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiiiiji(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11) {
+  var sp = stackSave();
+  try {
+    return dynCall_iiiiiiiiiji(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_vji(index,a1,a2,a3) {
+  var sp = stackSave();
+  try {
+    dynCall_vji(index,a1,a2,a3);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_ji(index,a1) {
+  var sp = stackSave();
+  try {
+    return dynCall_ji(index,a1);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiji(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    dynCall_viiiji(index,a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_jiiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
+  var sp = stackSave();
+  try {
+    return dynCall_jiiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iijii(index,a1,a2,a3,a4,a5) {
+  var sp = stackSave();
+  try {
+    return dynCall_iijii(index,a1,a2,a3,a4,a5);
   } catch(e) {
     stackRestore(sp);
     if (e !== e+0) throw e;
@@ -16085,87 +15605,10 @@ function invoke_iijji(index,a1,a2,a3,a4,a5,a6) {
   }
 }
 
-function invoke_iijii(index,a1,a2,a3,a4,a5) {
-  var sp = stackSave();
-  try {
-    return dynCall_iijii(index,a1,a2,a3,a4,a5);
-  } catch(e) {
-    stackRestore(sp);
-    if (e !== e+0) throw e;
-    _setThrew(1, 0);
-  }
-}
-
 function invoke_jiiiii(index,a1,a2,a3,a4,a5) {
   var sp = stackSave();
   try {
     return dynCall_jiiiii(index,a1,a2,a3,a4,a5);
-  } catch(e) {
-    stackRestore(sp);
-    if (e !== e+0) throw e;
-    _setThrew(1, 0);
-  }
-}
-
-function invoke_jijii(index,a1,a2,a3,a4,a5) {
-  var sp = stackSave();
-  try {
-    return dynCall_jijii(index,a1,a2,a3,a4,a5);
-  } catch(e) {
-    stackRestore(sp);
-    if (e !== e+0) throw e;
-    _setThrew(1, 0);
-  }
-}
-
-function invoke_viji(index,a1,a2,a3,a4) {
-  var sp = stackSave();
-  try {
-    dynCall_viji(index,a1,a2,a3,a4);
-  } catch(e) {
-    stackRestore(sp);
-    if (e !== e+0) throw e;
-    _setThrew(1, 0);
-  }
-}
-
-function invoke_jiiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
-  var sp = stackSave();
-  try {
-    return dynCall_jiiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
-  } catch(e) {
-    stackRestore(sp);
-    if (e !== e+0) throw e;
-    _setThrew(1, 0);
-  }
-}
-
-function invoke_viiji(index,a1,a2,a3,a4,a5) {
-  var sp = stackSave();
-  try {
-    dynCall_viiji(index,a1,a2,a3,a4,a5);
-  } catch(e) {
-    stackRestore(sp);
-    if (e !== e+0) throw e;
-    _setThrew(1, 0);
-  }
-}
-
-function invoke_iiji(index,a1,a2,a3,a4) {
-  var sp = stackSave();
-  try {
-    return dynCall_iiji(index,a1,a2,a3,a4);
-  } catch(e) {
-    stackRestore(sp);
-    if (e !== e+0) throw e;
-    _setThrew(1, 0);
-  }
-}
-
-function invoke_jiii(index,a1,a2,a3) {
-  var sp = stackSave();
-  try {
-    return dynCall_jiii(index,a1,a2,a3);
   } catch(e) {
     stackRestore(sp);
     if (e !== e+0) throw e;
@@ -16199,6 +15642,17 @@ function invoke_vjiiiii(index,a1,a2,a3,a4,a5,a6,a7) {
   var sp = stackSave();
   try {
     dynCall_vjiiiii(index,a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiji(index,a1,a2,a3,a4) {
+  var sp = stackSave();
+  try {
+    return dynCall_iiji(index,a1,a2,a3,a4);
   } catch(e) {
     stackRestore(sp);
     if (e !== e+0) throw e;
@@ -16379,7 +15833,6 @@ unexportedRuntimeFunction('ExceptionInfo', false);
 unexportedRuntimeFunction('CatchInfo', false);
 unexportedRuntimeFunction('exception_addRef', false);
 unexportedRuntimeFunction('exception_decRef', false);
-unexportedRuntimeFunction('formatException', false);
 unexportedRuntimeFunction('Browser', false);
 unexportedRuntimeFunction('funcWrappers', false);
 unexportedRuntimeFunction('getFuncWrapper', false);
