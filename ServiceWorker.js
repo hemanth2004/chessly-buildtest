@@ -1,4 +1,4 @@
-const cacheName = "Hmnt-Chessly_WECREC-1.0";
+const cacheName = "Hmnt-Chessly-1.0";
 const contentToCache = [
     "Build/chessly-buildtest.loader.js",
     "Build/chessly-buildtest.framework.js",
