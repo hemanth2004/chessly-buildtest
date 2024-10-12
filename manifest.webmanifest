@@ -1,15 +1,17 @@
 {
-    "name": "Chessly",
-    "short_name": "Chessly",
-    "start_url": "index.html",
-    "display": "fullscreen",
-    "background_color": "#231F20",
-    "theme_color": "#000",
-    "description": "Chessly. For WecRec.",
-    "icons": [{
-      "src": "TemplateData/icons/unity-logo-dark.png",
-      "sizes": "144x144",
+  "name": "Chessly",
+  "short_name": "Chessly",
+  "start_url": "index.html",
+  "display": "fullscreen",
+  "background_color": "#231F20",
+  "theme_color": "#000",
+  "description": "Chessly. For Wec Recruitment.",
+  "icons": [
+    {
+      "src": "TemplateData/chessly_logo.png",
+      "sizes": "139x128",
       "type": "image/png",
       "purpose": "any maskable"
-    }]
-  }
+    }
+  ]
+}
